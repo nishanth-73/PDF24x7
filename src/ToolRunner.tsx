@@ -6,7 +6,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { pageInfo, zip, type PageInfo, type PageOrder } from './pdf';
 import { STEPS, defaults, type Opts, type Tool, type WorkflowStep } from './tools';
-import { readPicked, save, share, type Saved } from './storage';
+import { openFile, readPicked, save, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from './art';
 import { renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
 import {
@@ -189,7 +189,7 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
           <Group>
             {results.map((r, i) => (
               <Row
-                key={r.uri} first={i === 0} lead={<DocGlyph kind={kindOf(r.name)} />} title={r.name}
+                key={r.uri} first={i === 0} lead={<DocGlyph kind={kindOf(r.name)} />} title={r.name} onPress={() => openFile(r)}
                 subtitle={results.length === 1 && files.length === 1 && files[0].size ? `${fmtSize(files[0].size)} → ${fmtSize(r.size)}` : fmtSize(r.size)}
               >
                 <Pressable onPress={() => share(r)} style={({ pressed }) => [s.pill, pressed && { backgroundColor: c.sunken }]}>
@@ -225,7 +225,7 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
     readPicked(file.uri).then(pageInfo)
       .then((info) => { if (live) { setPages(info); reset(info); } })
       .catch((e: Error) => live && onError(e.message));
-    // Page pictures are a bonus: without the native renderer (Expo Go, web) or on failure, tiles show numbers.
+    // Page pictures arrive after the page list; until then, or if rendering fails (e.g. encrypted PDF), tiles show numbers.
     renderThumbnails(file.uri).then((t) => live && setThumbs(t)).catch(() => {});
     return () => { live = false; };
   }, [file?.uri]);

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { listFiles, removeFile, share, type Saved } from '../../src/storage';
+import { listFiles, openFile, removeFile, share, type Saved } from '../../src/storage';
 import { DocGlyph, ToolArt, kindOf } from '../../src/art';
 import { Button, Group, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize, plural } from '../../src/ui';
 import { makeStyles, typo } from '../../src/theme';
@@ -28,7 +28,7 @@ export default function FilesTab() {
           {files.map((f, i) => (
             <Row
               key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
-              subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => share(f)}
+              subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
             >
               <IconBtn name="share-variant-outline" onPress={() => share(f)} />
               <IconBtn name="delete-outline" onPress={() => confirmDelete(f)} />

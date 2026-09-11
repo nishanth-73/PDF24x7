@@ -1,6 +1,7 @@
 // Outputs live in the app's documents folder so they survive restarts (cache can be purged by the OS).
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import { router } from 'expo-router';
 
 export type Saved = { name: string; uri: string; size: number; modified: number };
 
@@ -32,8 +33,8 @@ export function listFiles(): Saved[] {
   }
 }
 
-// Files from the document/image pickers sit outside expo-file-system's sandbox (Expo Go rejects them
-// with "Missing 'READ' permission"), so read them through fetch, which handles file:// and content://.
+// Files from the document/image pickers can sit outside expo-file-system's permitted folders
+// ("Missing 'READ' permission"), so read them through fetch, which handles file:// and content://.
 // ponytail: RN reads the blob via a base64 data URL, so a very large PDF briefly costs ~2× its size in memory.
 export async function readPicked(uri: string): Promise<Uint8Array> {
   const res = await fetch(uri);
@@ -42,6 +43,10 @@ export async function readPicked(uri: string): Promise<Uint8Array> {
 
 export const removeFile = (uri: string) => new File(uri).delete();
 export const clearFiles = () => folder().delete();
+
+// Tap-to-open: PDFs go to the in-app viewer; ZIPs can't be viewed, so they go to the share sheet.
+export const openFile = (f: { name: string; uri: string }) =>
+  f.name.toLowerCase().endsWith('.zip') ? share(f) : router.push({ pathname: '/view', params: { uri: f.uri, name: f.name } });
 
 export const share = (f: { name: string; uri: string }) =>
   Sharing.shareAsync(f.uri, f.name.endsWith('.zip')

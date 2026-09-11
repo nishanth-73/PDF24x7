@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SECTIONS, TOOLS, type Tool } from '../../src/tools';
-import { listFiles, share, type Saved } from '../../src/storage';
+import { listFiles, openFile, share, type Saved } from '../../src/storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from '../../src/art';
 import { Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
@@ -53,9 +53,9 @@ export default function Home() {
             {recent.map((f, i) => (
               <Row
                 key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
-                subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => share(f)}
+                subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
               >
-                <Icon name="share-variant-outline" size={18} color={c.sub} />
+                <IconBtn name="share-variant-outline" size={18} color={c.sub} onPress={() => share(f)} />
               </Row>
             ))}
           </Group>
