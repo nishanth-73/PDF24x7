@@ -1,6 +1,6 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
-  ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View,
+  ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View,
   type AccessibilityActionEvent, type StyleProp, type ViewStyle,
 } from 'react-native';
 import Animated, { useAnimatedRef, type AnimatedRef } from 'react-native-reanimated';
@@ -151,17 +151,26 @@ export function IconBtn({ name, onPress, size = 20, color }: { name: IconName; o
 }
 
 export function Button({ label, icon, variant = 'primary', onPress, busy, disabled, style }: {
-  label: string; icon?: IconName; variant?: 'primary' | 'secondary'; onPress: () => void;
+  label: string; icon?: IconName; variant?: 'primary' | 'secondary' | 'danger'; onPress: () => void;
   busy?: boolean; disabled?: boolean; style?: StyleProp<ViewStyle>;
 }) {
   const s = useStyles();
   const { c } = useTheme();
   const primary = variant === 'primary';
-  const fg = primary ? c.onInk : c.ink;
+  const danger = variant === 'danger';
+  const fg = primary || danger ? c.onInk : c.ink;
   return (
     <Pressable
       onPress={onPress} disabled={disabled || busy}
-      style={({ pressed }) => [s.btn, primary ? s.btnPrimary : s.btnSecondary, disabled && { opacity: 0.35 }, pressed && { opacity: 0.92 }, style]}
+      style={({ pressed }) => [
+        s.btn,
+        primary && s.btnPrimary,
+        variant === 'secondary' && s.btnSecondary,
+        danger && { backgroundColor: c.accent },
+        disabled && { opacity: 0.35 },
+        pressed && { opacity: 0.92 },
+        style,
+      ]}
     >
       {busy ? <ActivityIndicator color={fg} /> : !!icon && <Icon name={icon} size={19} color={fg} />}
       <Text style={[s.btnText, { color: fg }]}>{label}</Text>
@@ -176,6 +185,167 @@ export function Chip({ label, active, onPress }: { label: string; active?: boole
     <Pressable onPress={onPress} style={[s.chip, active && s.chipActive]}>
       <Text style={[s.chipText, active && { color: c.onInk }]}>{label}</Text>
     </Pressable>
+  );
+}
+
+export function DialogModal({
+  visible,
+  onClose,
+  title,
+  subtitle,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  const s = useStyles();
+  const { c } = useTheme();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalBackdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={s.modalCard}>
+          <View style={s.modalHead}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.modalTitle}>{title}</Text>
+              {!!subtitle && <Text style={s.modalSub}>{subtitle}</Text>}
+            </View>
+            <IconBtn name="close" size={20} color={c.faint} onPress={onClose} />
+          </View>
+          {children}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+export function ConfirmModal({
+  visible,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  danger = false,
+  requireTyping,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  requireTyping?: string;
+}) {
+  const s = useStyles();
+  const { c, scheme } = useTheme();
+  const [typed, setTyped] = useState('');
+
+  useEffect(() => {
+    if (visible) setTyped('');
+  }, [visible]);
+
+  const isMatch = !requireTyping || typed.trim().toLowerCase() === requireTyping.toLowerCase();
+
+  return (
+    <DialogModal visible={visible} onClose={onClose} title={title}>
+      <Text style={s.modalMessage}>{message}</Text>
+      {!!requireTyping && (
+        <View style={{ marginBottom: 18 }}>
+          <Text style={s.modalTypingHint}>
+            To confirm, type <Text style={{ fontFamily: fonts.bold, color: c.accent }}>{requireTyping}</Text> below:
+          </Text>
+          <TextInput
+            value={typed}
+            onChangeText={setTyped}
+            placeholder={`Type "${requireTyping}"`}
+            placeholderTextColor={c.faint}
+            style={[s.input, { marginTop: 8 }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardAppearance={scheme}
+          />
+        </View>
+      )}
+      <View style={s.modalActions}>
+        <Button label={cancelLabel} variant="secondary" onPress={onClose} style={{ flex: 1 }} />
+        <Button
+          label={confirmLabel}
+          variant={danger ? 'danger' : 'primary'}
+          disabled={!isMatch}
+          onPress={() => {
+            if (!isMatch) return;
+            onClose();
+            onConfirm();
+          }}
+          style={{ flex: 1 }}
+        />
+      </View>
+    </DialogModal>
+  );
+}
+
+export function PromptModal({
+  visible,
+  onClose,
+  onSubmit,
+  title,
+  subtitle,
+  placeholder = '',
+  initialValue = '',
+  submitLabel = 'Save',
+  cancelLabel = 'Cancel',
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (val: string) => void;
+  title: string;
+  subtitle?: string;
+  placeholder?: string;
+  initialValue?: string;
+  submitLabel?: string;
+  cancelLabel?: string;
+}) {
+  const s = useStyles();
+  const { c, scheme } = useTheme();
+  const [val, setVal] = useState(initialValue);
+
+  useEffect(() => {
+    if (visible) setVal(initialValue);
+  }, [visible, initialValue]);
+
+  const handleSubmit = () => {
+    const trimmed = val.trim();
+    if (!trimmed) return;
+    onClose();
+    onSubmit(trimmed);
+  };
+
+  return (
+    <DialogModal visible={visible} onClose={onClose} title={title} subtitle={subtitle}>
+      <TextInput
+        autoFocus
+        value={val}
+        onChangeText={setVal}
+        placeholder={placeholder}
+        placeholderTextColor={c.faint}
+        style={[s.input, { marginTop: 14, marginBottom: 18 }]}
+        autoCorrect={false}
+        keyboardAppearance={scheme}
+        onSubmitEditing={handleSubmit}
+        returnKeyType="done"
+      />
+      <View style={s.modalActions}>
+        <Button label={cancelLabel} variant="secondary" onPress={onClose} style={{ flex: 1 }} />
+        <Button label={submitLabel} variant="primary" disabled={!val.trim()} onPress={handleSubmit} style={{ flex: 1 }} />
+      </View>
+    </DialogModal>
   );
 }
 
@@ -268,4 +438,53 @@ const useStyles = makeStyles((c) => ({
   chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: c.lineStrong },
   chipActive: { backgroundColor: c.ink, borderColor: c.ink },
   chipText: { fontFamily: fonts.med, fontSize: 13, color: c.ink },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: c.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: c.lineStrong,
+    padding: 20,
+  },
+  modalHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  modalTitle: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    lineHeight: 26,
+    color: c.ink,
+  },
+  modalSub: {
+    ...typo.small,
+    color: c.sub,
+    marginTop: 4,
+  },
+  modalMessage: {
+    ...typo.body,
+    color: c.sub,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  modalTypingHint: {
+    ...typo.small,
+    color: c.ink,
+    marginBottom: 4,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
 }));

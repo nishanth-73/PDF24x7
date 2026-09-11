@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import { clearFiles, listFiles, type Saved } from '../../src/storage';
-import { Group, GroupLabel, Icon, LargeTitle, Row, Screen, fmtSize, plural } from '../../src/ui';
+import { ConfirmModal, Group, GroupLabel, Icon, LargeTitle, Row, Screen, fmtSize, plural } from '../../src/ui';
 import { fonts, makeStyles, palettes, radius, typo, useTheme, type Palette, type ThemePref } from '../../src/theme';
 import type { IconName } from '../../src/tools';
 
@@ -14,14 +14,9 @@ export default function SettingsTab() {
   const s = useStyles();
   const { c } = useTheme();
   const [files, setFiles] = useState<Saved[]>([]);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   useFocusEffect(useCallback(() => { setFiles(listFiles()); }, []));
   const total = files.reduce((sum, f) => sum + f.size, 0);
-
-  const clearAll = () =>
-    Alert.alert('Delete all saved files?', `${plural(files.length, 'file')} made in PDF Tools will be removed. The PDFs you picked as input are not touched.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete all', style: 'destructive', onPress: () => { clearFiles(); setFiles([]); } },
-    ]);
 
   const lead = (name: IconName, danger?: boolean) => (
     <View style={s.lead}><Icon name={name} size={20} color={danger ? c.accent : c.sub} /></View>
@@ -38,7 +33,7 @@ export default function SettingsTab() {
       <Group>
         <Row first lead={lead('folder-outline')} title="Saved files" value={String(files.length)} />
         <Row lead={lead('harddisk')} title="Space used" value={fmtSize(total)} />
-        <Row lead={lead('trash-can-outline', true)} title="Delete all saved files" danger onPress={files.length ? clearAll : undefined} />
+        <Row lead={lead('trash-can-outline', true)} title="Delete all saved files" danger onPress={files.length ? () => setShowClearConfirm(true) : undefined} />
       </Group>
 
       <GroupLabel label="Privacy" />
@@ -53,6 +48,20 @@ export default function SettingsTab() {
         <Row first lead={lead('information-outline')} title="Version" value={version} />
         <Row lead={lead('code-tags')} title="PDF engine" value="pdf-lib" />
       </Group>
+
+      <ConfirmModal
+        visible={showClearConfirm}
+        title="Delete all saved files?"
+        message={`${plural(files.length, 'file')} made in PDF Tools will be removed. The PDFs you picked as input are not touched.`}
+        confirmLabel="Delete all"
+        danger
+        requireTyping="confirm"
+        onConfirm={() => {
+          clearFiles();
+          setFiles([]);
+        }}
+        onClose={() => setShowClearConfirm(false)}
+      />
     </Screen>
   );
 }

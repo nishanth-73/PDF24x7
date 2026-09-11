@@ -147,6 +147,26 @@ function pageText(page: PDFPage): string {
   }).join(' ');
 }
 
+export type PageTextResult = { pageIndex: number; text: string };
+
+export async function extractAllText(bytes: Uint8Array): Promise<PageTextResult[]> {
+  try {
+    const doc = await load(bytes);
+    return doc.getPages().map((p, i) => {
+      let t = '';
+      try {
+        t = pageText(p)
+          .replace(/[ \t]+/g, ' ')
+          .replace(/\n\s*\n\s*/g, '\n\n')
+          .trim();
+      } catch {}
+      return { pageIndex: i, text: t };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function splitByText(bytes: Uint8Array, { phrase = '' }: { phrase?: string } = {}) {
   const needle = norm(phrase);
   if (!needle) throw new Error('Enter the phrase to split at.');

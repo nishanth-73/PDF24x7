@@ -5,19 +5,26 @@ import { Icon } from '../../src/ui';
 import { fonts, useTheme } from '../../src/theme';
 import type { IconName } from '../../src/tools';
 
-const icon = (name: IconName) => ({ color }: { color: ColorValue }) => <Icon name={name} size={25} color={color} />;
+const icon = (name: IconName) => ({ color }: { color: ColorValue }) => <Icon name={name} size={22} color={color} />;
 
 export default function TabsLayout() {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
+  const bottomPad = insets.bottom > 0 ? insets.bottom : 6;
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: c.accent,
         tabBarInactiveTintColor: c.sub,
-        tabBarStyle: { height: 68 + insets.bottom, paddingTop: 8, backgroundColor: c.surface, borderTopColor: c.line },
-        tabBarLabelStyle: { fontFamily: fonts.med, fontSize: 11.5, marginTop: 3 },
+        tabBarStyle: {
+          height: 50 + bottomPad,
+          paddingTop: 4,
+          paddingBottom: bottomPad > 6 ? bottomPad - 2 : 4,
+          backgroundColor: c.surface,
+          borderTopColor: c.line,
+        },
+        tabBarLabelStyle: { fontFamily: fonts.med, fontSize: 10.5, marginTop: 1 },
         sceneStyle: { backgroundColor: c.bg },
         // Replaces the default Android ripple with a light fade on every platform.
         tabBarButton: ({ children, style, onPress, onLongPress, accessibilityState, accessibilityLabel, testID }) => (

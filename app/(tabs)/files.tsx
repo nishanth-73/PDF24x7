@@ -1,12 +1,15 @@
-import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { BackHandler, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
-  createFolder, listFiles, listFolders, moveFile, moveFileToRoot, openFile, removeFile, removeFolder, renameFolder, share,
+  createFolder, listAllFiles, listFiles, listFolders, moveFile, moveFileToRoot, openFile, removeFile, removeFolder, renameFolder, share,
   type Folder, type Saved,
 } from '../../src/storage';
 import { DocGlyph, FolderGlyph, ToolArt, kindOf } from '../../src/art';
-import { Button, Chip, Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize, plural } from '../../src/ui';
+import {
+  Button, Chip, ConfirmModal, DialogModal, Group, GroupLabel, Icon, IconBtn, LargeTitle, PromptModal, Row, Screen,
+  fmtDate, fmtSize, plural,
+} from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
 
 type Filter = 'all' | 'pdf' | 'zip' | 'recent';
@@ -40,68 +43,163 @@ export default function FilesTab() {
   const [query, setQuery] = useState('');
   const [currentFolder, setCurrentFolder] = useState<Folder | null>(null);
 
+  // Modal states
+  const [promptConfig, setPromptConfig] = useState<{
+    visible: boolean;
+    title: string;
+    subtitle?: string;
+    placeholder?: string;
+    initialValue?: string;
+    submitLabel: string;
+    onSubmit: (val: string) => void;
+  } | null>(null);
+
+  const [confirmConfig, setConfirmConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    requireTyping?: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const [movingFile, setMovingFile] = useState<Saved | null>(null);
+
+  const [allFiles, setAllFiles] = useState<Saved[]>([]);
+
   const refresh = useCallback(() => {
     setFolders(currentFolder ? [] : listFolders());
     setFiles(listFiles(currentFolder?.uri));
+    setAllFiles(listAllFiles());
   }, [currentFolder]);
   useFocusEffect(refresh);
 
-  const needle = query.trim();
-  const filtered = applySearch(applyFilter(files, filter), needle);
-  const total = filtered.reduce((sum, f) => sum + f.size, 0);
+  const goBack = useCallback(() => {
+    setCurrentFolder(null);
+    setQuery('');
+    setFilter('all');
+  }, []);
 
-  const enterFolder = (f: Folder) => { setCurrentFolder(f); setQuery(''); setFilter('all'); };
-  const goBack = () => { setCurrentFolder(null); setQuery(''); setFilter('all'); };
-
-  // ── Folder actions ──────────────────────────────────────────────────
-
-  const promptNewFolder = () =>
-    Alert.prompt('New Folder', 'Enter a name for this folder.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Create', onPress: (name) => { if (name?.trim()) { createFolder(name.trim()); refresh(); } } },
-    ], 'plain-text');
-
-  const promptRename = (f: Folder) =>
-    Alert.prompt('Rename Folder', undefined, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Rename', onPress: (name) => { if (name?.trim()) { renameFolder(f.uri, name.trim()); refresh(); } } },
-    ], 'plain-text', f.name);
-
-  const confirmDeleteFolder = (f: Folder) =>
-    Alert.alert('Delete folder?', `"${f.name}" and all files inside it will be deleted.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => { removeFolder(f.uri); refresh(); } },
-    ]);
-
-  const confirmDelete = (f: Saved) =>
-    Alert.alert('Delete this file?', `${f.name} will be removed from this phone. Copies you already shared are not affected.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => { removeFile(f.uri); refresh(); } },
-    ]);
-
-  // ── Move-to-folder picker ──────────────────────────────────────────
-
-  const promptMoveToFolder = (file: Saved) => {
-    const allFolders = listFolders();
-    if (!allFolders.length && !currentFolder) {
-      Alert.alert('No folders', 'Create a folder first, then move files into it.');
-      return;
-    }
-    const buttons = allFolders
-      .filter((f) => f.uri !== currentFolder?.uri)
-      .map((f) => ({ text: f.name, onPress: () => { moveFile(file.uri, f.uri); refresh(); } }));
-    if (currentFolder) buttons.unshift({ text: '← Root (no folder)', onPress: () => { moveFileToRoot(file.uri); refresh(); } });
-    buttons.push({ text: 'Cancel', onPress: () => {} });
-    Alert.alert('Move to folder', file.name, buttons);
+  const enterFolder = (f: Folder) => {
+    setCurrentFolder(f);
+    setQuery('');
+    setFilter('all');
   };
 
-  // ── Render ─────────────────────────────────────────────────────────
+  // Intercept Android hardware back button when inside a folder so it returns to root Files screen
+  useEffect(() => {
+    if (!currentFolder) return;
+    const backAction = () => {
+      goBack();
+      return true; // handled!
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [currentFolder, goBack]);
+
+  const needle = query.trim();
+  const filtered = applySearch(applyFilter(files, filter), needle);
+
+  // Accurate size and subtitle computation (no more "0 B" for empty folders)
+  const totalAllBytes = allFiles.reduce((sum, f) => sum + f.size, 0);
+  const filteredBytes = filtered.reduce((sum, f) => sum + f.size, 0);
+
+  let subtitle: string | undefined;
+  if (currentFolder) {
+    if (needle || filter !== 'all') {
+      subtitle = filtered.length > 0
+        ? `${plural(filtered.length, 'file')} · ${fmtSize(filteredBytes)}`
+        : 'No matching files';
+    } else {
+      subtitle = files.length > 0
+        ? `${plural(files.length, 'file')} · ${fmtSize(filteredBytes)}`
+        : 'Empty folder';
+    }
+  } else {
+    // Root level
+    if (needle || filter !== 'all') {
+      subtitle = filtered.length > 0
+        ? `${plural(filtered.length, 'file')} · ${fmtSize(filteredBytes)}`
+        : 'No matching files';
+    } else {
+      if (allFiles.length > 0) {
+        subtitle = folders.length > 0
+          ? `${plural(allFiles.length, 'file')} across ${plural(folders.length, 'folder')} · ${fmtSize(totalAllBytes)} on this phone`
+          : `${plural(allFiles.length, 'file')} · ${fmtSize(totalAllBytes)} on this phone`;
+      } else if (folders.length > 0) {
+        subtitle = `${plural(folders.length, 'folder')}`;
+      } else {
+        subtitle = undefined;
+      }
+    }
+  }
 
   const hasContent = folders.length > 0 || filtered.length > 0;
-  const totalCount = folders.length + filtered.length;
-  const subtitle = currentFolder
-    ? `${plural(filtered.length, 'file')} · ${fmtSize(total)}`
-    : totalCount ? `${plural(totalCount, 'item')} · ${fmtSize(total)} on this phone` : undefined;
+  const allAvailableFolders = listFolders();
+
+  // ── Folder modal actions ────────────────────────────────────────────
+
+  const openNewFolderModal = () => {
+    setPromptConfig({
+      visible: true,
+      title: 'New Folder',
+      subtitle: 'Enter a name for this folder',
+      placeholder: 'Folder name',
+      initialValue: '',
+      submitLabel: 'Create',
+      onSubmit: (name) => {
+        createFolder(name);
+        refresh();
+      },
+    });
+  };
+
+  const openRenameFolderModal = (f: Folder) => {
+    setPromptConfig({
+      visible: true,
+      title: 'Rename Folder',
+      subtitle: `Rename "${f.name}"`,
+      placeholder: 'Folder name',
+      initialValue: f.name,
+      submitLabel: 'Save',
+      onSubmit: (newName) => {
+        renameFolder(f.uri, newName);
+        refresh();
+      },
+    });
+  };
+
+  const openDeleteFolderModal = (f: Folder) => {
+    const count = listFiles(f.uri).length;
+    setConfirmConfig({
+      visible: true,
+      title: 'Delete folder?',
+      message: `"${f.name}" and ${count === 0 ? 'any files inside' : `${plural(count, 'file')} inside`} will be permanently deleted.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      requireTyping: 'confirm',
+      onConfirm: () => {
+        removeFolder(f.uri);
+        refresh();
+      },
+    });
+  };
+
+  const openDeleteFileModal = (f: Saved) => {
+    setConfirmConfig({
+      visible: true,
+      title: 'Delete this file?',
+      message: `"${f.name}" will be removed from this phone. Copies you already shared are not affected.`,
+      confirmLabel: 'Delete',
+      danger: true,
+      requireTyping: 'confirm',
+      onConfirm: () => {
+        removeFile(f.uri);
+        refresh();
+      },
+    });
+  };
 
   return (
     <Screen>
@@ -110,7 +208,7 @@ export default function FilesTab() {
         <View style={s.breadcrumb}>
           <Pressable onPress={goBack} style={s.backBtn} hitSlop={8}>
             <Icon name="arrow-left" size={20} color={c.ink} />
-            <Text style={s.backText}>Files</Text>
+            <Text style={s.backText}>All Files</Text>
           </Pressable>
           <LargeTitle title={currentFolder.name} sub={subtitle} />
         </View>
@@ -140,7 +238,7 @@ export default function FilesTab() {
           {/* Folders (only at root level, not shown when inside a folder) */}
           {!currentFolder && folders.length > 0 && (
             <>
-              <GroupLabel label="Folders" />
+              <GroupLabel label="Folders" action="+ New Folder" onAction={openNewFolderModal} />
               <Group>
                 {folders.map((f, i) => (
                   <Row
@@ -148,11 +246,10 @@ export default function FilesTab() {
                     subtitle={`${plural(listFiles(f.uri).length, 'file')}`} onPress={() => enterFolder(f)}
                     chevron
                   >
-                    <IconBtn name="pencil-outline" size={16} color={c.sub} onPress={() => promptRename(f)} />
-                    <IconBtn name="delete-outline" size={16} color={c.sub} onPress={() => confirmDeleteFolder(f)} />
+                    <IconBtn name="pencil-outline" size={16} color={c.sub} onPress={() => openRenameFolderModal(f)} />
+                    <IconBtn name="delete-outline" size={16} color={c.sub} onPress={() => openDeleteFolderModal(f)} />
                   </Row>
                 ))}
-                <Row first={false} lead={<Icon name="folder-plus-outline" size={28} color={c.accent} />} title="New Folder" onPress={promptNewFolder} />
               </Group>
             </>
           )}
@@ -167,21 +264,27 @@ export default function FilesTab() {
                     key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
                     subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
                   >
-                    <IconBtn name="folder-move-outline" size={18} color={c.sub} onPress={() => promptMoveToFolder(f)} />
+                    <IconBtn name="folder-move-outline" size={18} color={c.sub} onPress={() => setMovingFile(f)} />
                     <IconBtn name="share-variant-outline" onPress={() => share(f)} />
-                    <IconBtn name="delete-outline" onPress={() => confirmDelete(f)} />
+                    <IconBtn name="delete-outline" onPress={() => openDeleteFileModal(f)} />
                   </Row>
                 ))}
               </Group>
             </>
           )}
 
-          {/* "New folder" when no folders exist yet */}
+          {/* "New folder" prompt when no folders exist yet */}
           {!currentFolder && folders.length === 0 && (
             <>
               <GroupLabel label="Organize" />
               <Group>
-                <Row first lead={<Icon name="folder-plus-outline" size={28} color={c.accent} />} title="New Folder" subtitle="Group your files into folders" onPress={promptNewFolder} />
+                <Row
+                  first
+                  lead={<Icon name="folder-plus-outline" size={26} color={c.accent} />}
+                  title="New Folder"
+                  subtitle="Create a folder to organize your files"
+                  onPress={openNewFolderModal}
+                />
               </Group>
             </>
           )}
@@ -189,17 +292,111 @@ export default function FilesTab() {
       ) : files.length === 0 && !needle ? (
         <View style={s.empty}>
           <ToolArt id="files" size={112} />
-          <Text style={s.emptyTitle}>No files yet</Text>
+          <Text style={s.emptyTitle}>{currentFolder ? 'This folder is empty' : 'No files yet'}</Text>
           <Text style={s.emptyBody}>
-            PDFs you merge, split, compress or scan are saved here, so you can share them again later.
+            {currentFolder
+              ? 'Move files into this folder or generate new PDFs.'
+              : 'PDFs you merge, split, compress or scan are saved here, so you can share them again later.'}
           </Text>
           <View style={s.actions}>
-            <Button icon="camera-outline" label="Scan a document" onPress={() => router.navigate('/scan')} />
-            <Button label="Browse tools" variant="secondary" onPress={() => router.navigate('/')} />
+            {currentFolder ? (
+              <Button label="Back to All Files" variant="secondary" onPress={goBack} />
+            ) : (
+              <>
+                <Button icon="folder-plus-outline" label="Create a folder" onPress={openNewFolderModal} />
+                <Button icon="camera-outline" label="Scan a document" variant="secondary" onPress={() => router.navigate('/scan')} />
+                <Button label="Browse tools" variant="secondary" onPress={() => router.navigate('/')} />
+              </>
+            )}
           </View>
         </View>
       ) : (
         <Text style={s.none}>No files match "{needle || filter}".</Text>
+      )}
+
+      {/* ── Prompt Modal (New Folder / Rename Folder) ── */}
+      {promptConfig && (
+        <PromptModal
+          visible={promptConfig.visible}
+          title={promptConfig.title}
+          subtitle={promptConfig.subtitle}
+          placeholder={promptConfig.placeholder}
+          initialValue={promptConfig.initialValue}
+          submitLabel={promptConfig.submitLabel}
+          onSubmit={promptConfig.onSubmit}
+          onClose={() => setPromptConfig(null)}
+        />
+      )}
+
+      {/* ── Confirm Modal (Delete Folder / Delete File) ── */}
+      {confirmConfig && (
+        <ConfirmModal
+          visible={confirmConfig.visible}
+          title={confirmConfig.title}
+          message={confirmConfig.message}
+          confirmLabel={confirmConfig.confirmLabel}
+          danger={confirmConfig.danger}
+          requireTyping={confirmConfig.requireTyping}
+          onConfirm={confirmConfig.onConfirm}
+          onClose={() => setConfirmConfig(null)}
+        />
+      )}
+
+      {/* ── Move File Modal ── */}
+      {movingFile && (
+        <DialogModal
+          visible={!!movingFile}
+          onClose={() => setMovingFile(null)}
+          title="Move File"
+          subtitle={movingFile.name}
+        >
+          <View style={{ marginTop: 12, marginBottom: 16 }}>
+            {currentFolder && (
+              <Pressable
+                onPress={() => {
+                  moveFileToRoot(movingFile.uri);
+                  setMovingFile(null);
+                  refresh();
+                }}
+                style={({ pressed }) => [s.moveOption, pressed && { backgroundColor: c.sunken }]}
+              >
+                <Icon name="home-outline" size={24} color={c.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.moveOptionTitle}>All Files (Root)</Text>
+                  <Text style={s.moveOptionSub}>Move out of this folder</Text>
+                </View>
+                <Icon name="chevron-right" size={20} color={c.faint} />
+              </Pressable>
+            )}
+
+            {allAvailableFolders
+              .filter((f) => f.uri !== currentFolder?.uri)
+              .map((f) => (
+                <Pressable
+                  key={f.uri}
+                  onPress={() => {
+                    moveFile(movingFile.uri, f.uri);
+                    setMovingFile(null);
+                    refresh();
+                  }}
+                  style={({ pressed }) => [s.moveOption, pressed && { backgroundColor: c.sunken }]}
+                >
+                  <FolderGlyph size={28} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.moveOptionTitle}>{f.name}</Text>
+                    <Text style={s.moveOptionSub}>{plural(listFiles(f.uri).length, 'file')}</Text>
+                  </View>
+                  <Icon name="chevron-right" size={20} color={c.faint} />
+                </Pressable>
+              ))}
+
+            {allAvailableFolders.filter((f) => f.uri !== currentFolder?.uri).length === 0 && !currentFolder && (
+              <Text style={s.moveEmpty}>No folders exist yet. Create a folder first to organize files.</Text>
+            )}
+          </View>
+
+          <Button label="Cancel" variant="secondary" onPress={() => setMovingFile(null)} />
+        </DialogModal>
       )}
     </Screen>
   );
@@ -212,12 +409,35 @@ const useStyles = makeStyles((c) => ({
   },
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 15.5, color: c.ink, paddingVertical: 0 },
   chips: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4, paddingHorizontal: 2 },
-  breadcrumb: { marginBottom: -10 },
-  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  backText: { fontFamily: fonts.med, fontSize: 15, color: c.ink },
+  breadcrumb: { marginBottom: 12 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  backText: { fontFamily: fonts.med, fontSize: 14, color: c.sub },
   empty: { alignItems: 'center', paddingTop: 36, paddingHorizontal: 12 },
   emptyTitle: { ...typo.title, fontSize: 23, color: c.ink, marginTop: 14 },
   emptyBody: { ...typo.body, color: c.sub, textAlign: 'center', marginTop: 6 },
   actions: { alignSelf: 'stretch', gap: 10, marginTop: 24 },
   none: { ...typo.body, color: c.sub, textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
+  moveOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: radius.tile,
+  },
+  moveOptionTitle: {
+    ...typo.item,
+    color: c.ink,
+  },
+  moveOptionSub: {
+    ...typo.small,
+    color: c.sub,
+    marginTop: 1,
+  },
+  moveEmpty: {
+    ...typo.small,
+    color: c.sub,
+    textAlign: 'center',
+    paddingVertical: 16,
+  },
 }));

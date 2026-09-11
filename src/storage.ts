@@ -8,7 +8,7 @@ export type Folder = { name: string; uri: string; created: number };
 
 function rootFolder() {
   const d = new Directory(Paths.document, 'PDF Tools');
-  if (!d.exists) d.create();
+  if (!d.exists) d.create({ intermediates: true, idempotent: true });
   return d;
 }
 
@@ -19,7 +19,7 @@ export function createFolder(name: string): Folder {
   const root = rootFolder();
   let d = new Directory(root, clean);
   for (let i = 2; d.exists; i++) d = new Directory(root, `${clean} (${i})`);
-  d.create();
+  d.create({ intermediates: true, idempotent: true });
   return { name: d.name, uri: d.uri, created: Date.now() };
 }
 
@@ -37,23 +37,62 @@ export function listFolders(): Folder[] {
 export function renameFolder(uri: string, newName: string): void {
   const clean = newName.replace(/[\\/:*?"<>|]+/g, '_').trim();
   if (!clean) return;
-  const d = new Directory(uri);
-  if (d.exists) d.move(new Directory(rootFolder(), clean));
+  try {
+    const d = new Directory(uri);
+    if (d.exists) {
+      try {
+        d.rename(clean);
+      } catch {
+        d.moveSync(new Directory(rootFolder(), clean));
+      }
+    }
+  } catch (e) {
+    console.warn('renameFolder failed:', e);
+  }
 }
 
 export function removeFolder(uri: string): void {
-  const d = new Directory(uri);
-  if (d.exists) d.delete();
+  try {
+    const d = new Directory(uri);
+    if (d.exists) d.delete();
+  } catch (e) {
+    console.warn('removeFolder failed:', e);
+  }
 }
 
 export function moveFile(fileUri: string, folderUri: string): void {
-  const f = new File(fileUri);
-  if (f.exists) f.move(new Directory(folderUri));
+  try {
+    const f = new File(fileUri);
+    if (f.exists) {
+      const targetDir = new Directory(folderUri);
+      if (!targetDir.exists) targetDir.create({ intermediates: true, idempotent: true });
+      const targetFile = new File(targetDir, f.name);
+      try {
+        f.moveSync(targetFile);
+      } catch {
+        f.moveSync(targetDir);
+      }
+    }
+  } catch (e) {
+    console.warn('moveFile failed:', e);
+  }
 }
 
 export function moveFileToRoot(fileUri: string): void {
-  const f = new File(fileUri);
-  if (f.exists) f.move(rootFolder());
+  try {
+    const f = new File(fileUri);
+    if (f.exists) {
+      const root = rootFolder();
+      const targetFile = new File(root, f.name);
+      try {
+        f.moveSync(targetFile);
+      } catch {
+        f.moveSync(root);
+      }
+    }
+  } catch (e) {
+    console.warn('moveFileToRoot failed:', e);
+  }
 }
 
 // ── File operations ─────────────────────────────────────────────────────
