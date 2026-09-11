@@ -7,14 +7,18 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#F3EFE6",
+    "backgroundColor": "#FFFFFF",
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.sammyi57.pdftools",
+      "supportsTablet": true,
+      "infoPlist": {
+        "CADisableMinimumFrameDurationOnPhone": true
+      }
     },
     "android": {
-      "package": "com.pdftools.app",
+      "package": "com.sammyi57.pdftools",
       "adaptiveIcon": {
-        "backgroundColor": "#F3EFE6",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -32,7 +36,8 @@
           "cameraPermission": "PDF Tools uses the camera to scan documents into PDFs. Photos never leave your device."
         }
       ],
-      "expo-router"
+      "expo-router",
+      "./plugins/withMaxRefreshRate"
     ]
   }
 }
