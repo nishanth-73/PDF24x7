@@ -234,6 +234,17 @@ export function DocGlyph({ kind, size = 36 }: { kind: 'pdf' | 'zip'; size?: numb
   );
 }
 
+// Folder icon for file-list rows.
+export function FolderGlyph({ size = 36 }: { size?: number }) {
+  const { c } = useTheme();
+  const k = kitOf(c);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 36 36">
+      <Path d="M4 10C4 8.9 4.9 8 6 8H14L17 12H30C31.1 12 32 12.9 32 14V28C32 29.1 31.1 30 30 30H6C4.9 30 4 29.1 4 28V10Z" fill={k.soft} stroke={k.accent} strokeWidth={1.5} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 export const kindOf = (name: string): 'pdf' | 'zip' => (name.toLowerCase().endsWith('.zip') ? 'zip' : 'pdf');
 
 const useStyles = makeStyles((c) => ({

@@ -169,6 +169,16 @@ export function Button({ label, icon, variant = 'primary', onPress, busy, disabl
   );
 }
 
+export function Chip({ label, active, onPress }: { label: string; active?: boolean; onPress: () => void }) {
+  const s = useStyles();
+  const { c } = useTheme();
+  return (
+    <Pressable onPress={onPress} style={[s.chip, active && s.chipActive]}>
+      <Text style={[s.chipText, active && { color: c.onInk }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function Options({ defs, value, onChange }: { defs: OptDef[]; value: Opts; onChange: (o: Opts) => void }) {
   const s = useStyles();
   const { c, scheme } = useTheme();
@@ -255,4 +265,7 @@ const useStyles = makeStyles((c) => ({
     height: 48, paddingHorizontal: 14, borderRadius: radius.control, borderWidth: 1, borderColor: c.line,
     backgroundColor: c.surface, fontFamily: fonts.sans, fontSize: 15, color: c.ink,
   },
+  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: c.lineStrong },
+  chipActive: { backgroundColor: c.ink, borderColor: c.ink },
+  chipText: { fontFamily: fonts.med, fontSize: 13, color: c.ink },
 }));

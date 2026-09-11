@@ -4,16 +4,64 @@ import * as Sharing from 'expo-sharing';
 import { router } from 'expo-router';
 
 export type Saved = { name: string; uri: string; size: number; modified: number };
+export type Folder = { name: string; uri: string; created: number };
 
-function folder() {
+function rootFolder() {
   const d = new Directory(Paths.document, 'PDF Tools');
   if (!d.exists) d.create();
   return d;
 }
 
+// ── Folder management (one level deep) ──────────────────────────────────
+
+export function createFolder(name: string): Folder {
+  const clean = name.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'New Folder';
+  const root = rootFolder();
+  let d = new Directory(root, clean);
+  for (let i = 2; d.exists; i++) d = new Directory(root, `${clean} (${i})`);
+  d.create();
+  return { name: d.name, uri: d.uri, created: Date.now() };
+}
+
+export function listFolders(): Folder[] {
+  try {
+    return rootFolder().list()
+      .filter((x): x is Directory => x instanceof Directory)
+      .map((d) => ({ name: d.name, uri: d.uri, created: 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
+export function renameFolder(uri: string, newName: string): void {
+  const clean = newName.replace(/[\\/:*?"<>|]+/g, '_').trim();
+  if (!clean) return;
+  const d = new Directory(uri);
+  if (d.exists) d.move(new Directory(rootFolder(), clean));
+}
+
+export function removeFolder(uri: string): void {
+  const d = new Directory(uri);
+  if (d.exists) d.delete();
+}
+
+export function moveFile(fileUri: string, folderUri: string): void {
+  const f = new File(fileUri);
+  if (f.exists) f.move(new Directory(folderUri));
+}
+
+export function moveFileToRoot(fileUri: string): void {
+  const f = new File(fileUri);
+  if (f.exists) f.move(rootFolder());
+}
+
+// ── File operations ─────────────────────────────────────────────────────
+
 // Never overwrites: "Report-merged.pdf" becomes "Report-merged (2).pdf" if taken.
-export function save(base: string, ext: string, bytes: Uint8Array): Saved & { bytes: Uint8Array } {
-  const d = folder();
+export function save(base: string, ext: string, bytes: Uint8Array, folderUri?: string): Saved & { bytes: Uint8Array } {
+  const d = folderUri ? new Directory(folderUri) : rootFolder();
+  if (!d.exists) d.create();
   const clean = base.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document';
   let f = new File(d, `${clean}.${ext}`);
   for (let i = 2; f.exists; i++) f = new File(d, `${clean} (${i}).${ext}`);
@@ -22,14 +70,26 @@ export function save(base: string, ext: string, bytes: Uint8Array): Saved & { by
   return { name: f.name, uri: f.uri, size: bytes.length, modified: Date.now(), bytes };
 }
 
-export function listFiles(): Saved[] {
+export function listFiles(folderUri?: string): Saved[] {
   try {
-    return folder().list()
+    const d = folderUri ? new Directory(folderUri) : rootFolder();
+    return d.list()
       .filter((x): x is File => x instanceof File)
       .map((f) => ({ name: f.name, uri: f.uri, size: f.size, modified: f.lastModified ?? 0 }))
       .sort((a, b) => b.modified - a.modified);
   } catch {
     return []; // no file system (web preview) or unreadable folder
+  }
+}
+
+/** List every file across root + all folders (for global search). */
+export function listAllFiles(): Saved[] {
+  try {
+    const all = listFiles();
+    for (const folder of listFolders()) all.push(...listFiles(folder.uri));
+    return all.sort((a, b) => b.modified - a.modified);
+  } catch {
+    return [];
   }
 }
 
@@ -42,7 +102,7 @@ export async function readPicked(uri: string): Promise<Uint8Array> {
 }
 
 export const removeFile = (uri: string) => new File(uri).delete();
-export const clearFiles = () => folder().delete();
+export const clearFiles = () => rootFolder().delete();
 
 // Tap-to-open: PDFs go to the in-app viewer; ZIPs can't be viewed, so they go to the share sheet.
 export const openFile = (f: { name: string; uri: string }) =>

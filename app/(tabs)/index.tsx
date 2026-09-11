@@ -2,22 +2,41 @@ import { useCallback, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SECTIONS, TOOLS, type Tool } from '../../src/tools';
-import { listFiles, openFile, share, type Saved } from '../../src/storage';
+import { listAllFiles, openFile, share, type Saved } from '../../src/storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from '../../src/art';
 import { Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
 
 const open = (t: Tool) => (t.id === 'scan' ? router.navigate('/scan') : router.push(`/tool/${t.id}`));
 
+// Tokenized search: every word in the query must appear somewhere in the target string.
+// "split text" matches "Split PDF by Text", "compress pdf" matches "Compress PDF", etc.
+function tokenMatch(target: string, tokens: string[]): boolean {
+  const lower = target.toLowerCase();
+  return tokens.every((t) => lower.includes(t));
+}
+
 export default function Home() {
   const s = useStyles();
   const { c } = useTheme();
   const [q, setQ] = useState('');
   const [recent, setRecent] = useState<Saved[]>([]);
-  useFocusEffect(useCallback(() => { setRecent(listFiles().slice(0, 3)); }, []));
+  useFocusEffect(useCallback(() => { setRecent(listAllFiles().slice(0, 3)); }, []));
 
   const needle = q.trim().toLowerCase();
-  const list = TOOLS.filter((t) => `${t.title} ${t.desc}`.toLowerCase().includes(needle));
+  const tokens = needle ? needle.split(/\s+/).filter(Boolean) : [];
+
+  // Search tools: tokenized (word-order-independent)
+  const toolResults = tokens.length
+    ? TOOLS.filter((t) => tokenMatch(`${t.title} ${t.desc}`, tokens))
+    : TOOLS;
+
+  // Search files: when query is active, match files by name
+  const fileResults = tokens.length
+    ? listAllFiles().filter((f) => tokenMatch(f.name, tokens))
+    : [];
+
+  const hasResults = toolResults.length > 0 || fileResults.length > 0;
 
   return (
     <Screen>
@@ -62,8 +81,25 @@ export default function Home() {
         </>
       )}
 
+      {/* File results when searching */}
+      {needle && fileResults.length > 0 && (
+        <>
+          <GroupLabel label="Files" action="All files" onAction={() => router.navigate('/files')} />
+          <Group>
+            {fileResults.slice(0, 5).map((f, i) => (
+              <Row
+                key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
+                subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
+              >
+                <IconBtn name="share-variant-outline" size={18} color={c.sub} onPress={() => share(f)} />
+              </Row>
+            ))}
+          </Group>
+        </>
+      )}
+
       {SECTIONS.map((name, si) => {
-        const items = list.filter((t) => t.section === si && (needle || t.id !== 'scan'));
+        const items = toolResults.filter((t) => t.section === si && (needle || t.id !== 'scan'));
         if (!items.length) return null;
         return (
           <View key={name}>
@@ -77,8 +113,8 @@ export default function Home() {
         );
       })}
 
-      {!list.length && (
-        <Text style={s.none}>Nothing called “{q.trim()}”. Try “merge”, “split” or “compress”.</Text>
+      {!hasResults && (
+        <Text style={s.none}>No tools or files match "{q.trim()}". Try "merge", "split" or "compress".</Text>
       )}
     </Screen>
   );
