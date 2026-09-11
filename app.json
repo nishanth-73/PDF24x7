@@ -2,10 +2,11 @@
   "expo": {
     "name": "PDF Tools",
     "slug": "pdf-app",
+    "scheme": "pdftools",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#F3EFE6",
     "ios": {
       "supportsTablet": true

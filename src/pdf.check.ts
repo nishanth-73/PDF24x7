@@ -1,13 +1,13 @@
-// npm run check — smoke-tests every PDF op in Node against a generated 6-page file.
+// npm run check — smoke-tests every PDF op in Node (native TS type stripping) against a generated 6-page file.
 import assert from 'node:assert/strict';
 import { PDFDocument, PDFName, PDFString, StandardFonts } from 'pdf-lib';
 import jpeg from 'jpeg-js';
-import * as P from './pdf.js';
+import * as P from './pdf.ts';
 
 const doc = await PDFDocument.create();
 const font = await doc.embedFont(StandardFonts.Helvetica);
 const noise = { width: 300, height: 300, data: Uint8Array.from({ length: 300 * 300 * 4 }, () => Math.random() * 255) };
-const photo = jpeg.encode(noise, 100).data;
+const photo = new Uint8Array(jpeg.encode(noise, 100).data);
 const img = await doc.embedJpg(photo);
 for (let i = 1; i <= 6; i++) {
   const p = doc.addPage([400, 600]);
@@ -23,9 +23,9 @@ ctx.assign(outlines, ctx.obj({ Type: 'Outlines', First: a, Last: b, Count: 2 }))
 doc.catalog.set(PDFName.of('Outlines'), outlines);
 const src = await doc.save();
 
-const f = (bytes) => ({ name: 'in.pdf', bytes });
-const count = async (x) => (await PDFDocument.load(x)).getPageCount();
-const counts = (outs) => Promise.all(outs.map((o) => count(o.bytes)));
+const f = (bytes: Uint8Array) => ({ name: 'in.pdf', bytes });
+const count = async (x: Uint8Array) => (await PDFDocument.load(x)).getPageCount();
+const counts = (outs: { bytes: Uint8Array }[]) => Promise.all(outs.map((o) => count(o.bytes)));
 
 assert.deepEqual(P.parseRanges('1-2, 4, 5-', 6), [[0, 1], [3], [4, 5]]);
 assert.throws(() => P.parseRanges('9', 6));
