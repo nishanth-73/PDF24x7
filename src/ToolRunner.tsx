@@ -8,24 +8,24 @@ import { pageInfo, zip, type PageInfo, type PageOrder } from './pdf';
 import { STEPS, defaults, type Opts, type Tool, type WorkflowStep } from './tools';
 import { readPicked, save, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from './art';
-import { Button, Group, GroupLabel, Icon, IconBtn, LargeTitle, Options, Row, StepHead, fmtSize, pad, plural } from './ui';
+import { renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
+import {
+  Button, DragHandle, Group, GroupLabel, Icon, IconBtn, LargeTitle, Options, Reorderable, Row, StepHead,
+  fmtSize, moveActions, pad, plural, swap,
+} from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 
 type Picked = { name: string; uri: string; size?: number | null };
 type Result = Saved & { bytes: Uint8Array };
 type EditorProps = { file?: Picked; value: Opts; onChange: (o: Opts) => void; onError: (msg: string) => void };
 
-const swap = <T,>(arr: T[], a: number, b: number): T[] => {
-  if (b < 0 || b >= arr.length) return arr;
-  const o = [...arr];
-  [o[a], o[b]] = [o[b], o[a]];
-  return o;
-};
 const stamp = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}.${pad(d.getMinutes())}`;
 };
 const stripPdf = (name: string) => name.replace(/\.pdf$/i, '');
+const GAP = 10; // organize grid gap
+const AREA_H = 180; // organize page preview height
 
 const EDITORS: Record<string, ComponentType<EditorProps>> = { organize: OrganizeEditor, workflow: WorkflowEditor };
 
@@ -43,6 +43,8 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
   const ready = files.length >= (multi ? tool.min ?? 2 : 1);
 
   const changeFiles = (next: Picked[]) => { setFiles(next); setResults([]); setError(''); };
+  const move = (from: number, to: number) => changeFiles(swap(files, from, to));
+  const remove = (f: Picked) => changeFiles(files.filter((x) => x !== f));
 
   const pickPdf = async () => {
     const r = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', multiple: multi, copyToCacheDirectory: true });
@@ -81,6 +83,13 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
   const shareAll = () => share(save(`${stripPdf(files[0].name)}-all`, 'zip', zip(results)));
   const busyLabel = images ? `Building a ${files.length}-page PDF…` : `${tool.doing}…`;
 
+  const fileRow = (f: Picked, i: number, draggable: boolean) => (
+    <Row first={i === 0} lead={<DocGlyph kind="pdf" />} title={f.name} subtitle={fmtSize(f.size)}>
+      <IconBtn name="close" onPress={() => remove(f)} />
+      {draggable && <DragHandle index={i} move={move} />}
+    </Row>
+  );
+
   return (
     <>
       {images ? (
@@ -99,16 +108,20 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
             />
             <Button icon="image-multiple-outline" label="Import photos" variant="secondary" onPress={() => addPhotos(false)} style={{ flex: 1 }} />
           </View>
+          {files.length > 1 && <Text style={[s.hint, { marginTop: 14 }]}>Hold a page and drag it to change the order.</Text>}
           <View style={s.thumbs}>
-            {files.map((f, i) => (
-              <View key={f.uri} style={s.thumb}>
-                <Image source={{ uri: f.uri }} style={StyleSheet.absoluteFill} />
-                <Text style={s.thumbNum}>{i + 1}</Text>
-                <Pressable style={s.thumbX} hitSlop={8} onPress={() => changeFiles(files.filter((x) => x !== f))}>
-                  <Icon name="close" size={14} color={c.ink} />
-                </Pressable>
-              </View>
-            ))}
+            <Reorderable
+              data={files} columns={3} gap={8} keyOf={(f) => f.uri} onReorder={changeFiles}
+              renderItem={(f, i) => (
+                <View style={s.thumb}>
+                  <Image source={{ uri: f.uri }} style={StyleSheet.absoluteFill} />
+                  <Text style={s.thumbNum} accessibilityLabel={`Page ${i + 1}`} {...moveActions(i, move)}>{i + 1}</Text>
+                  <Pressable style={s.thumbX} hitSlop={8} onPress={() => remove(f)} accessibilityLabel={`Remove page ${i + 1}`}>
+                    <Icon name="close" size={14} color={c.ink} />
+                  </Pressable>
+                </View>
+              )}
+            />
           </View>
         </>
       ) : (
@@ -128,17 +141,14 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
           <StepHead n={1} title={multi ? 'Choose PDFs' : 'Choose a PDF'} />
           {files.length > 0 && (
             <Group>
-              {files.map((f, i) => (
-                <Row key={f.uri} first={i === 0} lead={<DocGlyph kind="pdf" />} title={f.name} subtitle={fmtSize(f.size)}>
-                  {multi && files.length > 1 && (
-                    <>
-                      <IconBtn name="arrow-up" onPress={() => changeFiles(swap(files, i, i - 1))} />
-                      <IconBtn name="arrow-down" onPress={() => changeFiles(swap(files, i, i + 1))} />
-                    </>
-                  )}
-                  <IconBtn name="close" onPress={() => changeFiles(files.filter((x) => x !== f))} />
-                </Row>
-              ))}
+              {multi && files.length > 1 ? (
+                <Reorderable
+                  data={files} keyOf={(f) => f.uri} onReorder={changeFiles} handle
+                  renderItem={(f, i) => <View style={s.rowBg}>{fileRow(f, i, true)}</View>}
+                />
+              ) : (
+                files.map((f, i) => <View key={f.uri}>{fileRow(f, i, false)}</View>)
+              )}
             </Group>
           )}
           {(multi || !files.length) && (
@@ -146,7 +156,7 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
               <Icon name={files.length ? 'plus' : 'file-plus-outline'} size={26} color={c.ink} />
               <Text style={s.dropTitle}>{files.length ? 'Add another PDF' : multi ? 'Choose PDF files' : 'Choose a PDF file'}</Text>
               <Text style={s.dropSub}>
-                {multi ? `At least ${tool.min ?? 2}. Use the arrows to set the order.` : 'From Files, Drive or Downloads'}
+                {multi ? `At least ${tool.min ?? 2}. Drag the handles to set the order.` : 'From Files, Drive or Downloads'}
               </Text>
             </Pressable>
           )}
@@ -200,16 +210,24 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   const s = useStyles();
   const { c } = useTheme();
   const [pages, setPages] = useState<PageInfo[] | null>(null);
+  const [thumbs, setThumbs] = useState<Thumb[] | null>(null);
+  const [cell, setCell] = useState(0);
   const order: PageOrder[] = value.order ?? [];
   const set = (o: PageOrder[]) => onChange({ order: o });
+  const move = (from: number, to: number) => set(swap(order, from, to));
   const reset = (info: PageInfo[]) => set(info.map((_, i) => ({ i, rot: 0 })));
 
   useEffect(() => {
     if (!file) return;
+    let live = true;
     setPages(null);
+    setThumbs(null);
     readPicked(file.uri).then(pageInfo)
-      .then((info) => { setPages(info); reset(info); })
-      .catch((e: Error) => onError(e.message));
+      .then((info) => { if (live) { setPages(info); reset(info); } })
+      .catch((e: Error) => live && onError(e.message));
+    // Page pictures are a bonus: without the native renderer (Expo Go, web) or on failure, tiles show numbers.
+    renderThumbnails(file.uri).then((t) => live && setThumbs(t)).catch(() => {});
+    return () => { live = false; };
   }, [file?.uri]);
 
   if (!file) return <Text style={s.hint}>Your pages appear here once you choose a PDF.</Text>;
@@ -218,31 +236,53 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   return (
     <>
       <View style={s.orgBar}>
-        <Text style={s.hint}>Keeping {order.length} of {plural(pages.length, 'page')}</Text>
+        <Text style={s.hint}>Keeping {order.length} of {plural(pages.length, 'page')}. Hold a page to drag it.</Text>
         <Text style={s.link} onPress={() => reset(pages)}>Reset</Text>
       </View>
-      <View style={s.grid}>
-        {order.map((o, k) => {
-          const p = pages[o.i];
-          const turned = ((p.rot + o.rot) / 90) % 2 === 1;
-          const aspect = turned ? p.height / p.width : p.width / p.height;
-          return (
-            <View key={`${o.i}-${k}`} style={s.pageCell}>
-              <View style={s.pageArea}>
-                <View style={[s.pageBox, aspect > 0.8 ? { width: '88%' } : { height: '100%' }, { aspectRatio: aspect }]}>
-                  <Text style={s.pageNum}>{o.i + 1}</Text>
+      <View onLayout={(e) => setCell(Math.floor((e.nativeEvent.layout.width - GAP) / 2))}>
+        <Reorderable
+          data={order} columns={2} gap={GAP} keyOf={(o) => String(o.i)} onReorder={set}
+          renderItem={(o, k) => {
+            const p = pages[o.i];
+            const t = thumbs?.[o.i];
+            // Base orientation: the rendered picture (already includes the page's own rotation), else the page size.
+            const [bw, bh] = t ? [t.width, t.height] : p.rot % 180 ? [p.height, p.width] : [p.width, p.height];
+            const turned = o.rot % 180 !== 0;
+            const [w, h] = turned ? [bh, bw] : [bw, bh];
+            const fit = Math.min((cell - 16) / w, AREA_H / h);
+            const box = { width: w * fit, height: h * fit };
+            const img = turned ? { width: box.height, height: box.width } : box;
+            return (
+              <View style={s.pageCell}>
+                <View style={s.pageArea}>
+                  {cell > 0 && (
+                    <View style={[s.pageBox, box]}>
+                      {t ? (
+                        <Image
+                          source={{ uri: t.uri }}
+                          style={{
+                            position: 'absolute', ...img, left: (box.width - img.width) / 2, top: (box.height - img.height) / 2,
+                            transform: [{ rotate: `${o.rot}deg` }],
+                          }}
+                        />
+                      ) : (
+                        <Text style={s.pageNum}>{o.i + 1}</Text>
+                      )}
+                    </View>
+                  )}
+                  <Text style={s.pageBadge} accessibilityLabel={`Page ${o.i + 1}, position ${k + 1}`} {...moveActions(k, move)}>
+                    {o.i + 1}
+                  </Text>
                   {o.rot > 0 && <Text style={s.pageRot}>{o.rot}°</Text>}
                 </View>
+                <View style={s.pageTools}>
+                  <IconBtn name="rotate-right" onPress={() => set(order.map((x, j) => (j === k ? { ...x, rot: (x.rot + 90) % 360 } : x)))} />
+                  <IconBtn name="delete-outline" onPress={() => set(order.filter((_, j) => j !== k))} />
+                </View>
               </View>
-              <View style={s.pageTools}>
-                <IconBtn name="arrow-left" size={17} onPress={() => set(swap(order, k, k - 1))} />
-                <IconBtn name="rotate-right" size={17} onPress={() => set(order.map((x, j) => (j === k ? { ...x, rot: (x.rot + 90) % 360 } : x)))} />
-                <IconBtn name="delete-outline" size={17} onPress={() => set(order.filter((_, j) => j !== k))} />
-                <IconBtn name="arrow-right" size={17} onPress={() => set(swap(order, k, k + 1))} />
-              </View>
-            </View>
-          );
-        })}
+            );
+          }}
+        />
       </View>
     </>
   );
@@ -253,25 +293,28 @@ function WorkflowEditor({ value, onChange }: EditorProps) {
   const { c } = useTheme();
   const steps: WorkflowStep[] = value.steps ?? [];
   const set = (next: WorkflowStep[]) => onChange({ ...value, steps: next });
+  const move = (from: number, to: number) => set(swap(steps, from, to));
   return (
     <>
-      {steps.map((step, k) => (
-        <View key={step.id} style={s.stepCard}>
-          <View style={s.stepCardHead}>
-            <Text style={s.stepNum}>{k + 1}</Text>
-            <Text style={s.stepCardTitle}>{STEPS[step.op].label}</Text>
-            <IconBtn name="arrow-up" onPress={() => set(swap(steps, k, k - 1))} />
-            <IconBtn name="arrow-down" onPress={() => set(swap(steps, k, k + 1))} />
-            <IconBtn name="close" onPress={() => set(steps.filter((_, j) => j !== k))} />
+      <Reorderable
+        data={steps} gap={10} keyOf={(step) => step.id} onReorder={set} handle
+        renderItem={(step, k) => (
+          <View style={s.stepCard}>
+            <View style={s.stepCardHead}>
+              <Text style={s.stepNum}>{k + 1}</Text>
+              <Text style={s.stepCardTitle}>{STEPS[step.op].label}</Text>
+              <IconBtn name="close" onPress={() => set(steps.filter((_, j) => j !== k))} />
+              <DragHandle index={k} move={move} />
+            </View>
+            <Options
+              defs={STEPS[step.op].opts} value={step.opts}
+              onChange={(o) => set(steps.map((x, j) => (j === k ? { ...x, opts: o } : x)))}
+            />
           </View>
-          <Options
-            defs={STEPS[step.op].opts} value={step.opts}
-            onChange={(o) => set(steps.map((x, j) => (j === k ? { ...x, opts: o } : x)))}
-          />
-        </View>
-      ))}
-      <Text style={[s.hint, { marginBottom: 10 }]}>
-        {steps.length ? 'Steps run top to bottom on the same file. Add another:' : 'Pick the steps to run, in order:'}
+        )}
+      />
+      <Text style={[s.hint, { marginTop: steps.length ? 12 : 0, marginBottom: 10 }]}>
+        {steps.length ? 'Steps run top to bottom on the same file. Drag the handles to reorder. Add another:' : 'Pick the steps to run, in order:'}
       </Text>
       <View style={s.addRow}>
         {Object.entries(STEPS).map(([op, d]) => (
@@ -299,6 +342,7 @@ const useStyles = makeStyles((c) => ({
     borderRadius: radius.group, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
   },
   tipText: { ...typo.small, color: c.sub, flex: 1 },
+  rowBg: { backgroundColor: c.surface },
   drop: {
     alignItems: 'center', paddingVertical: 22, paddingHorizontal: 16, borderRadius: radius.group,
     borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.lineStrong, backgroundColor: c.surface,
@@ -306,8 +350,8 @@ const useStyles = makeStyles((c) => ({
   dropTitle: { fontFamily: fonts.bold, fontSize: 15, color: c.ink, marginTop: 6 },
   dropSub: { ...typo.small, color: c.sub, marginTop: 2 },
   twoBtns: { flexDirection: 'row', gap: 10 },
-  thumbs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-  thumb: { width: '31.5%', aspectRatio: 0.75, borderRadius: 8, overflow: 'hidden', backgroundColor: c.sunken },
+  thumbs: { marginTop: 14 },
+  thumb: { width: '100%', aspectRatio: 0.75, borderRadius: 8, overflow: 'hidden', backgroundColor: c.sunken },
   thumbNum: {
     position: 'absolute', left: 6, bottom: 6, minWidth: 20, textAlign: 'center', fontFamily: fonts.bold, fontSize: 11,
     color: c.onInk, backgroundColor: c.ink, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, overflow: 'hidden',
@@ -321,16 +365,25 @@ const useStyles = makeStyles((c) => ({
   again: { fontFamily: fonts.med, fontSize: 14, color: c.accent, textAlign: 'center', marginTop: 18, paddingVertical: 4 },
   hint: { ...typo.small, color: c.sub },
   link: { fontFamily: fonts.med, fontSize: 13.5, color: c.accent },
-  orgBar: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pageCell: { width: '31.5%', padding: 6, borderRadius: radius.control, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
-  pageArea: { height: 108, alignItems: 'center', justifyContent: 'center', backgroundColor: c.sunken, borderRadius: 8 },
-  pageBox: { alignItems: 'center', justifyContent: 'center', backgroundColor: c.page, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong, borderRadius: 2 },
-  pageNum: { fontFamily: fonts.bold, fontSize: 18, color: c.ink },
-  pageRot: { position: 'absolute', bottom: 3, fontFamily: fonts.med, fontSize: 9.5, color: c.accent },
-  pageTools: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  orgBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  pageCell: { padding: 8, borderRadius: radius.control, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
+  pageArea: { height: AREA_H, alignItems: 'center', justifyContent: 'center', backgroundColor: c.sunken, borderRadius: 8, overflow: 'hidden' },
+  pageBox: {
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: c.page,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
+  },
+  pageNum: { fontFamily: fonts.bold, fontSize: 20, color: c.faint },
+  pageBadge: {
+    position: 'absolute', left: 6, bottom: 6, minWidth: 22, textAlign: 'center', paddingHorizontal: 6, paddingVertical: 1,
+    borderRadius: 4, overflow: 'hidden', fontFamily: fonts.bold, fontSize: 11, color: c.onInk, backgroundColor: c.ink,
+  },
+  pageRot: {
+    position: 'absolute', right: 6, top: 6, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, overflow: 'hidden',
+    fontFamily: fonts.bold, fontSize: 11, color: c.onInk, backgroundColor: c.accent,
+  },
+  pageTools: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 6 },
   stepCard: {
-    padding: 14, paddingBottom: 0, marginBottom: 10, borderRadius: radius.group,
+    padding: 14, paddingBottom: 0, borderRadius: radius.group,
     backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
   },
   stepCardHead: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },

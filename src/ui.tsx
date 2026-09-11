@@ -1,7 +1,10 @@
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, type StyleProp, type ViewStyle,
+  ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View,
+  type AccessibilityActionEvent, type StyleProp, type ViewStyle,
 } from 'react-native';
+import Animated, { useAnimatedRef, type AnimatedRef } from 'react-native-reanimated';
+import Sortable from 'react-native-sortables';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
@@ -20,14 +23,62 @@ export const fmtDate = (ms: number) => {
 };
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+// The screen's scroll view, shared so drag-to-reorder lists can auto-scroll it near the edges.
+const ScrollRef = createContext<AnimatedRef<Animated.ScrollView> | undefined>(undefined);
+
 export function Screen({ children, edges = ['top'] }: { children: ReactNode; edges?: Edge[] }) {
   const s = useStyles();
+  const ref = useAnimatedRef<Animated.ScrollView>();
   return (
     <SafeAreaView edges={edges} style={s.root}>
-      <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        {children}
-      </ScrollView>
+      <ScrollRef.Provider value={ref}>
+        <Animated.ScrollView ref={ref} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {children}
+        </Animated.ScrollView>
+      </ScrollRef.Provider>
     </SafeAreaView>
+  );
+}
+
+export const swap = <T,>(arr: T[], a: number, b: number): T[] => {
+  if (b < 0 || b >= arr.length) return arr;
+  const o = [...arr];
+  [o[a], o[b]] = [o[b], o[a]];
+  return o;
+};
+
+// Screen-reader equivalent of dragging: "Move earlier" / "Move later" actions on an item.
+export const moveActions = (index: number, move: (from: number, to: number) => void) => ({
+  accessibilityActions: [{ name: 'earlier', label: 'Move earlier' }, { name: 'later', label: 'Move later' }],
+  onAccessibilityAction: (e: AccessibilityActionEvent) => move(index, index + (e.nativeEvent.actionName === 'earlier' ? -1 : 1)),
+});
+
+// Drag-to-reorder list or grid. With `handle`, only <DragHandle> starts a drag (for rows holding inputs and
+// buttons); otherwise a long press anywhere on the item does.
+export function Reorderable<T>({ data, keyOf, onReorder, renderItem, columns = 1, gap = 0, handle = false }: {
+  data: T[]; keyOf: (item: T) => string; onReorder: (next: T[]) => void; renderItem: (item: T, index: number) => ReactNode;
+  columns?: number; gap?: number; handle?: boolean;
+}) {
+  const scrollableRef = useContext(ScrollRef);
+  return (
+    <Sortable.Grid
+      data={data} columns={columns} rowGap={gap} columnGap={gap} keyExtractor={keyOf} customHandle={handle}
+      renderItem={({ item, index }) => <>{renderItem(item, index)}</>}
+      onDragEnd={({ data: next }) => onReorder(next)}
+      scrollableRef={scrollableRef} autoScrollEnabled={!!scrollableRef}
+      activeItemScale={1.03} dragActivationDelay={handle ? 0 : 250}
+    />
+  );
+}
+
+export function DragHandle({ index, move }: { index: number; move: (from: number, to: number) => void }) {
+  const { c } = useTheme();
+  return (
+    <Sortable.Handle>
+      <View style={{ padding: 7 }} accessible accessibilityLabel="Reorder" {...moveActions(index, move)}>
+        <Icon name="drag" size={22} color={c.faint} />
+      </View>
+    </Sortable.Handle>
   );
 }
 

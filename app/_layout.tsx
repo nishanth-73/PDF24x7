@@ -1,3 +1,4 @@
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -8,9 +9,11 @@ export default function RootLayout() {
   // If the font files fail to load, fall back to the system font rather than a blank app.
   if (!loaded && !error) return null;
   return (
-    <ThemeProvider>
-      <Shell />
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <Shell />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 
