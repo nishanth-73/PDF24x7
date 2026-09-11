@@ -4,10 +4,9 @@ import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'rea
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { File } from 'expo-file-system';
 import { pageInfo, zip, type PageInfo, type PageOrder } from './pdf';
 import { STEPS, defaults, type Opts, type Tool, type WorkflowStep } from './tools';
-import { save, share, type Saved } from './storage';
+import { readPicked, save, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from './art';
 import { Button, Group, GroupLabel, Icon, IconBtn, LargeTitle, Options, Row, StepHead, fmtSize, pad, plural } from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
@@ -69,7 +68,7 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
     setResults([]);
     await new Promise((r) => setTimeout(r, 60)); // let the spinner paint before heavy JS work
     try {
-      const inputs = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await new File(f.uri).bytes() })));
+      const inputs = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await readPicked(f.uri) })));
       const outs = await tool.run(inputs, opts);
       const base = images ? `Scan ${stamp()}` : stripPdf(files[0].name);
       setResults(outs.map((o) => save(o.name ? `${base}-${o.name}` : base, o.ext ?? 'pdf', o.bytes)));
@@ -120,8 +119,10 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
               <Text style={s.backText}>Tools</Text>
             </Pressable>
           )}
-          <ArtTile id={tool.id} size={68} />
-          <Text style={s.title}>{tool.title}</Text>
+          <View style={s.head}>
+            <ArtTile id={tool.id} size={64} />
+            <Text style={s.title}>{tool.title}</Text>
+          </View>
           <Text style={s.desc}>{tool.desc}</Text>
 
           <StepHead n={1} title={multi ? 'Choose PDFs' : 'Choose a PDF'} />
@@ -206,7 +207,7 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   useEffect(() => {
     if (!file) return;
     setPages(null);
-    new File(file.uri).bytes().then(pageInfo)
+    readPicked(file.uri).then(pageInfo)
       .then((info) => { setPages(info); reset(info); })
       .catch((e: Error) => onError(e.message));
   }, [file?.uri]);
@@ -290,8 +291,9 @@ function WorkflowEditor({ value, onChange }: EditorProps) {
 const useStyles = makeStyles((c) => ({
   back: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginLeft: -6, marginTop: 4, marginBottom: 18 },
   backText: { fontFamily: fonts.med, fontSize: 16, color: c.ink },
-  title: { ...typo.title, color: c.ink, marginTop: 16 },
-  desc: { ...typo.body, color: c.sub, marginTop: 8 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  title: { ...typo.title, fontSize: 23, lineHeight: 30, color: c.accent, flex: 1 },
+  desc: { ...typo.body, color: c.sub, marginTop: 14 },
   tip: {
     flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, marginBottom: 16,
     borderRadius: radius.group, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
@@ -325,7 +327,7 @@ const useStyles = makeStyles((c) => ({
   pageArea: { height: 108, alignItems: 'center', justifyContent: 'center', backgroundColor: c.sunken, borderRadius: 8 },
   pageBox: { alignItems: 'center', justifyContent: 'center', backgroundColor: c.page, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong, borderRadius: 2 },
   pageNum: { fontFamily: fonts.bold, fontSize: 18, color: c.ink },
-  pageRot: { position: 'absolute', bottom: 3, fontFamily: fonts.mono, fontSize: 9.5, color: c.accent },
+  pageRot: { position: 'absolute', bottom: 3, fontFamily: fonts.med, fontSize: 9.5, color: c.accent },
   pageTools: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   stepCard: {
     padding: 14, paddingBottom: 0, marginBottom: 10, borderRadius: radius.group,

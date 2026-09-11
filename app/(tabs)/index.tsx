@@ -33,7 +33,7 @@ export default function Home() {
       </View>
 
       {!needle && (
-        <Pressable onPress={() => router.navigate('/scan')} style={({ pressed }) => [s.scan, pressed && { opacity: 0.9 }]}>
+        <Pressable onPress={() => router.navigate('/scan')} style={({ pressed }) => [s.scan, pressed && { opacity: 0.95 }]}>
           <View style={{ flex: 1 }}>
             <Text style={s.scanTitle}>Scan a document</Text>
             <Text style={s.scanSub}>Photograph pages, get one PDF. Nothing is uploaded.</Text>
@@ -94,7 +94,7 @@ const useStyles = makeStyles((c) => ({
     flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 16, padding: 16, paddingRight: 14,
     borderRadius: radius.card, backgroundColor: c.ink,
   },
-  scanTitle: { fontFamily: fonts.serif, fontSize: 22, letterSpacing: -0.3, color: c.onInk },
+  scanTitle: { fontFamily: fonts.display, fontSize: 20, lineHeight: 27, letterSpacing: -0.2, color: c.onInk },
   scanSub: { ...typo.small, color: c.faint, marginTop: 4 },
   scanCta: {
     flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 14,

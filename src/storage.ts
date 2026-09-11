@@ -32,6 +32,14 @@ export function listFiles(): Saved[] {
   }
 }
 
+// Files from the document/image pickers sit outside expo-file-system's sandbox (Expo Go rejects them
+// with "Missing 'READ' permission"), so read them through fetch, which handles file:// and content://.
+// ponytail: RN reads the blob via a base64 data URL, so a very large PDF briefly costs ~2× its size in memory.
+export async function readPicked(uri: string): Promise<Uint8Array> {
+  const res = await fetch(uri);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export const removeFile = (uri: string) => new File(uri).delete();
 export const clearFiles = () => folder().delete();
 

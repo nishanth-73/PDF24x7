@@ -120,7 +120,7 @@ export function Button({ label, icon, variant = 'primary', onPress, busy, disabl
 
 export function Options({ defs, value, onChange }: { defs: OptDef[]; value: Opts; onChange: (o: Opts) => void }) {
   const s = useStyles();
-  const { c } = useTheme();
+  const { c, scheme } = useTheme();
   const set = (k: string, v: unknown) => onChange({ ...value, [k]: v });
   return (
     <>
@@ -154,7 +154,7 @@ export function Options({ defs, value, onChange }: { defs: OptDef[]; value: Opts
               <TextInput
                 style={s.input} value={value[d.key]} onChangeText={(v) => set(d.key, v)} placeholder={d.placeholder}
                 placeholderTextColor={c.faint} keyboardType={d.keyboard ?? 'default'} autoCorrect={false}
-                keyboardAppearance={c.bg === '#141311' ? 'dark' : 'light'}
+                keyboardAppearance={scheme}
               />
             )}
           </View>

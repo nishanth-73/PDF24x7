@@ -1,9 +1,10 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Appearance, StyleSheet, useColorScheme, type TextStyle } from 'react-native';
 import { File, Paths } from 'expo-file-system';
-import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces';
-import { IBMPlexMono_500Medium } from '@expo-google-fonts/ibm-plex-mono';
-import { IBMPlexSans_400Regular, IBMPlexSans_500Medium, IBMPlexSans_600SemiBold } from '@expo-google-fonts/ibm-plex-sans';
+// Per-weight imports: the package root would bundle all 18 Poppins files (~3 MB).
+import { Poppins_400Regular } from '@expo-google-fonts/poppins/400Regular';
+import { Poppins_500Medium } from '@expo-google-fonts/poppins/500Medium';
+import { Poppins_600SemiBold } from '@expo-google-fonts/poppins/600SemiBold';
 
 // White paper and ink with one red pencil. Dark is the same idea at night:
 // charcoal and bone, never neon on pure black.
@@ -42,31 +43,25 @@ export const palettes = { light, dark };
 export type Scheme = keyof typeof palettes;
 export type ThemePref = 'system' | Scheme;
 
+// Poppins throughout. It runs tall, so line heights are ~1.3× to keep accents and descenders unclipped on Android.
 export const fonts = {
-  serif: 'Fraunces_600SemiBold', // screen titles only
-  sans: 'IBMPlexSans_400Regular',
-  med: 'IBMPlexSans_500Medium',
-  bold: 'IBMPlexSans_600SemiBold',
-  mono: 'IBMPlexMono_500Medium', // numbers: sizes, counts
+  display: 'Poppins_600SemiBold', // screen titles
+  sans: 'Poppins_400Regular',
+  med: 'Poppins_500Medium',
+  bold: 'Poppins_600SemiBold',
 } as const;
 
-export const fontAssets = {
-  Fraunces_600SemiBold,
-  IBMPlexSans_400Regular,
-  IBMPlexSans_500Medium,
-  IBMPlexSans_600SemiBold,
-  IBMPlexMono_500Medium,
-};
+export const fontAssets = { Poppins_400Regular, Poppins_500Medium, Poppins_600SemiBold };
 
 export const typo = {
-  largeTitle: { fontFamily: fonts.serif, fontSize: 34, lineHeight: 40, letterSpacing: -0.6 },
-  title: { fontFamily: fonts.serif, fontSize: 27, lineHeight: 32, letterSpacing: -0.4 },
-  body: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 21 },
-  small: { fontFamily: fonts.sans, fontSize: 13, lineHeight: 18 },
-  item: { fontFamily: fonts.med, fontSize: 15.5 },
+  largeTitle: { fontFamily: fonts.display, fontSize: 32, lineHeight: 42, letterSpacing: -0.5 },
+  title: { fontFamily: fonts.display, fontSize: 25, lineHeight: 33, letterSpacing: -0.3 },
+  body: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 22 },
+  small: { fontFamily: fonts.sans, fontSize: 13, lineHeight: 19 },
+  item: { fontFamily: fonts.med, fontSize: 15 },
   label: { fontFamily: fonts.bold, fontSize: 13 },
   button: { fontFamily: fonts.bold, fontSize: 15 },
-  num: { fontFamily: fonts.mono, fontSize: 12 },
+  num: { fontFamily: fonts.med, fontSize: 12.5 },
 } satisfies Record<string, TextStyle>;
 
 // Deliberately not one radius for everything: small things are tighter.

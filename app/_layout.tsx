@@ -4,8 +4,9 @@ import { useFonts } from 'expo-font';
 import { ThemeProvider, fontAssets, useTheme } from '../src/theme';
 
 export default function RootLayout() {
-  const [loaded] = useFonts(fontAssets);
-  if (!loaded) return null;
+  const [loaded, error] = useFonts(fontAssets);
+  // If the font files fail to load, fall back to the system font rather than a blank app.
+  if (!loaded && !error) return null;
   return (
     <ThemeProvider>
       <Shell />

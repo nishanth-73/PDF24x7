@@ -12,6 +12,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.pdftools.app",
       "adaptiveIcon": {
         "backgroundColor": "#F3EFE6",
         "foregroundImage": "./assets/android-icon-foreground.png",
