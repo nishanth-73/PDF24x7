@@ -3,16 +3,38 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "@expo-google-fonts/fraunces": "^0.4.1",
+    "@expo-google-fonts/ibm-plex-mono": "^0.4.1",
+    "@expo-google-fonts/ibm-plex-sans": "^0.4.1",
+    "@expo/vector-icons": "^15.0.2",
+    "@types/react": "~19.2.4",
     "expo": "~57.0.22",
+    "expo-constants": "~57.0.18",
+    "expo-document-picker": "~57.0.2",
+    "expo-file-system": "~57.0.7",
+    "expo-font": "~57.0.4",
+    "expo-image-picker": "~57.0.17",
+    "expo-linking": "~57.0.10",
+    "expo-router": "~57.0.21",
+    "expo-sharing": "~57.0.19",
     "expo-status-bar": "~57.0.1",
+    "fflate": "^0.8.3",
+    "jpeg-js": "^0.4.4",
+    "pdf-lib": "^1.17.1",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-web": "^0.21.2",
+    "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "check": "node --no-warnings src/pdf.check.mjs"
   },
   "private": true
 }

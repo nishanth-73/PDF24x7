@@ -1,17 +1,18 @@
 {
   "expo": {
-    "name": "pdf-app",
+    "name": "PDF Tools",
     "slug": "pdf-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "backgroundColor": "#F3EFE6",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F3EFE6",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,6 +20,17 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sharing",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "PDF Tools uses the camera to scan documents into PDFs. Photos never leave your device."
+        }
+      ],
+      "expo-router"
+    ]
   }
 }
