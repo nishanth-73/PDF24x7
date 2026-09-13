@@ -1,9 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View,
-  type AccessibilityActionEvent, type StyleProp, type ViewStyle,
+  type AccessibilityActionEvent, type StyleProp, type TextStyle, type ViewStyle,
 } from 'react-native';
-import Animated, { useAnimatedRef, type AnimatedRef } from 'react-native-reanimated';
+import Animated, {
+  Easing, cancelAnimation, useAnimatedRef, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence,
+  withTiming, type AnimatedRef,
+} from 'react-native-reanimated';
 import Sortable from 'react-native-sortables';
 import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
@@ -66,7 +69,7 @@ export function Reorderable<T>({ data, keyOf, onReorder, renderItem, columns = 1
       renderItem={({ item, index }) => <>{renderItem(item, index)}</>}
       onDragEnd={({ data: next }) => onReorder(next)}
       scrollableRef={scrollableRef} autoScrollEnabled={!!scrollableRef}
-      activeItemScale={1.03} dragActivationDelay={handle ? 0 : 250}
+      activeItemScale={1.03} dragActivationDelay={handle ? 0 : 150}
     />
   );
 }
@@ -108,9 +111,9 @@ export function Group({ children }: { children: ReactNode }) {
 }
 
 // List row with an inset separator that starts after the leading artwork, like native grouped lists.
-export function Row({ lead, title, subtitle, value, onPress, first, danger, chevron, children }: {
+export function Row({ lead, title, subtitle, value, onPress, first, danger, chevron, marquee, children }: {
   lead?: ReactNode; title: string; subtitle?: string; value?: string; onPress?: () => void;
-  first?: boolean; danger?: boolean; chevron?: boolean; children?: ReactNode;
+  first?: boolean; danger?: boolean; chevron?: boolean; marquee?: boolean; children?: ReactNode;
 }) {
   const s = useStyles();
   const { c } = useTheme();
@@ -119,7 +122,9 @@ export function Row({ lead, title, subtitle, value, onPress, first, danger, chev
       {lead}
       <View style={[s.rowBody, !first && s.rowRule]}>
         <View style={{ flex: 1 }}>
-          <Text style={[s.rowTitle, danger && { color: c.accent }]} numberOfLines={1}>{title}</Text>
+          {marquee
+            ? <Marquee text={title} style={[s.rowTitle, danger && { color: c.accent }]} />
+            : <Text style={[s.rowTitle, danger && { color: c.accent }]} numberOfLines={1}>{title}</Text>}
           {!!subtitle && <Text style={s.rowSub} numberOfLines={2}>{subtitle}</Text>}
         </View>
         {!!value && <Text style={s.rowValue}>{value}</Text>}
@@ -127,6 +132,32 @@ export function Row({ lead, title, subtitle, value, onPress, first, danger, chev
         {chevron && <Icon name="chevron-right" size={20} color={c.faint} />}
       </View>
     </Pressable>
+  );
+}
+
+// Single-line text that slowly scrolls back and forth when it doesn't fit, instead of ending in "…".
+export function Marquee({ text, style }: { text: string; style?: StyleProp<TextStyle> }) {
+  const [boxW, setBoxW] = useState(0);
+  const [textW, setTextW] = useState(0);
+  const reduced = useReducedMotion();
+  const x = useSharedValue(0);
+  const over = boxW && textW > boxW ? textW - boxW : 0;
+  useEffect(() => {
+    x.value = 0;
+    if (!over || reduced) return;
+    const go = (to: number) => withDelay(1200, withTiming(to, { duration: over * 25, easing: Easing.linear })); // ~40 px/s
+    x.value = withRepeat(withSequence(go(-over), go(0)), -1);
+    return () => cancelAnimation(x);
+  }, [over, reduced]);
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+  if (reduced) return <Text style={style} numberOfLines={1}>{text}</Text>;
+  return (
+    <View style={{ overflow: 'hidden' }} onLayout={(e) => setBoxW(e.nativeEvent.layout.width)} accessible accessibilityLabel={text}>
+      {/* wide track so the text lays out at its natural width instead of being clipped to the row */}
+      <Animated.View style={[{ width: 4000, flexDirection: 'row' }, slide]}>
+        <Text style={style} numberOfLines={1} onLayout={(e) => setTextW(e.nativeEvent.layout.width)}>{text}</Text>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -270,6 +301,13 @@ export function ConfirmModal({
             autoCapitalize="none"
             autoCorrect={false}
             keyboardAppearance={scheme}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (isMatch) {
+                onClose();
+                onConfirm();
+              }
+            }}
           />
         </View>
       )}
@@ -397,8 +435,8 @@ export function Options({ defs, value, onChange }: { defs: OptDef[]; value: Opts
 
 const useStyles = makeStyles((c) => ({
   root: { flex: 1, backgroundColor: c.bg },
-  page: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 48 },
-  titleBlock: { marginTop: 12, marginBottom: 18 },
+  page: { paddingHorizontal: 18, paddingTop: 2, paddingBottom: 48 },
+  titleBlock: { marginTop: 2, marginBottom: 14 },
   largeTitle: { ...typo.largeTitle, color: c.ink },
   titleSub: { ...typo.small, color: c.sub, marginTop: 4 },
   groupLabel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 26, marginBottom: 8, paddingHorizontal: 4 },

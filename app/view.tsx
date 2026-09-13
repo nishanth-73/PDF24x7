@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, Image, Modal, PixelRatio, Pressable, ScrollView, Share,
+  ActivityIndicator, BackHandler, FlatList, Image, Modal, PixelRatio, Platform, Pressable, ScrollView, Share,
   StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,13 +21,172 @@ type SearchMatch = {
   snippet: string;
 };
 
+type PageItemProps = {
+  item: Thumb;
+  index: number;
+  totalPages: number;
+  pageW: number;
+  zoom: number;
+  text?: string;
+  isExpanded: boolean;
+  isSearchHit: boolean;
+  onToggleExpand: (index: number) => void;
+  onCopyText: (text: string, pageNum: number) => void;
+};
+
+const PageItem = memo(function PageItem({
+  item,
+  index,
+  totalPages,
+  pageW,
+  zoom,
+  text,
+  isExpanded,
+  isSearchHit,
+  onToggleExpand,
+  onCopyText,
+}: PageItemProps) {
+  const s = useStyles();
+  const { c } = useTheme();
+  const hasText = !!text;
+  const imgW = pageW * zoom;
+  const imgH = ((pageW * item.height) / item.width) * zoom;
+
+  return (
+    <View style={s.pageWrapper}>
+      {/* Search Hit Banner */}
+      {isSearchHit && (
+        <View style={s.hitBanner}>
+          <Icon name="check-circle-outline" size={14} color={c.accent} />
+          <Text style={s.hitBannerText}>Search match on this page</Text>
+        </View>
+      )}
+
+      {/* Rendered Page Image (Scrollable horizontally when zoomed) */}
+      {zoom > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <Image source={{ uri: item.uri }} style={[s.page, { width: imgW, height: imgH }]} resizeMode="contain" />
+        </ScrollView>
+      ) : (
+        <Image source={{ uri: item.uri }} style={[s.page, { width: imgW, height: imgH }]} resizeMode="contain" />
+      )}
+
+      {/* Page Footer Info & Selectable Text Trigger */}
+      <View style={s.pageFooter}>
+        <Text style={s.pageNo}>Page {index + 1} of {totalPages}</Text>
+        {hasText && (
+          <Pressable onPress={() => onToggleExpand(index)} style={s.selectTextToggle}>
+            <Icon name={isExpanded ? 'chevron-up' : 'format-text'} size={15} color={c.accent} />
+            <Text style={s.selectTextToggleLabel}>
+              {isExpanded ? 'Hide text' : 'Select / copy text'}
+            </Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* Expandable Selectable Text Card */}
+      {isExpanded && hasText && (
+        <View style={s.inlineTextBox}>
+          <View style={s.inlineTextHead}>
+            <Text style={s.inlineTextTitle}>Selectable Page Text:</Text>
+            <Pressable onPress={() => onCopyText(text || '', index + 1)} style={s.inlineCopyBtn}>
+              <Icon name="content-copy" size={13} color={c.ink} />
+              <Text style={s.inlineCopyText}>Share text</Text>
+            </Pressable>
+          </View>
+          <TextInput
+            value={text}
+            editable={false}
+            multiline
+            scrollEnabled={false}
+            showSoftInputOnFocus={false}
+            contextMenuHidden={false}
+            selectionColor={c.accent}
+            cursorColor={c.accent}
+            style={s.selectableContent}
+          />
+        </View>
+      )}
+    </View>
+  );
+});
+
+type TextPageItemProps = {
+  index: number;
+  totalPages: number;
+  text?: string;
+  isSearchHit: boolean;
+  onCopyText: (text: string, pageNum: number) => void;
+};
+
+const TextPageItem = memo(function TextPageItem({
+  index,
+  totalPages,
+  text,
+  isSearchHit,
+  onCopyText,
+}: TextPageItemProps) {
+  const s = useStyles();
+  const { c } = useTheme();
+  const rawText = text || '';
+
+  return (
+    <View style={[s.textCard, isSearchHit && s.textCardHighlighted]}>
+      <View style={s.textCardHead}>
+        <View style={s.textCardHeadLeft}>
+          <Icon name="file-document-outline" size={16} color={c.accent} />
+          <Text style={s.textCardPage}>Page {index + 1} of {totalPages}</Text>
+        </View>
+        {!!rawText && (
+          <Pressable onPress={() => onCopyText(rawText, index + 1)} style={s.inlineCopyBtn}>
+            <Icon name="content-copy" size={13} color={c.ink} />
+            <Text style={s.inlineCopyText}>Share page</Text>
+          </Pressable>
+        )}
+      </View>
+
+      {rawText ? (
+        <TextInput
+          value={rawText}
+          editable={false}
+          multiline
+          scrollEnabled={false}
+          showSoftInputOnFocus={false}
+          contextMenuHidden={false}
+          selectionColor={c.accent}
+          cursorColor={c.accent}
+          style={s.selectableContent}
+        />
+      ) : (
+        <Text style={s.emptyPageText}>No text detected on this page.</Text>
+      )}
+    </View>
+  );
+});
+
+type GridTileProps = {
+  item: Thumb;
+  index: number;
+  onSelect: (index: number) => void;
+};
+
+const GridTile = memo(function GridTile({ item, index, onSelect }: GridTileProps) {
+  const s = useStyles();
+  return (
+    <Pressable onPress={() => onSelect(index)} style={s.gridTile}>
+      <Image source={{ uri: item.uri }} style={s.gridThumb} resizeMode="contain" />
+      <Text style={s.gridPageNo}>{index + 1}</Text>
+    </Pressable>
+  );
+});
+
 export default function Viewer() {
   const s = useStyles();
   const { c, scheme } = useTheme();
   const { uri, name } = useLocalSearchParams<{ uri: string; name: string }>();
   const { width } = useWindowDimensions();
   const pageW = width - PAD * 2;
-  const file = { uri, name };
+  const file = { uri: uri || '', name: name || 'Document.pdf' };
 
   const flatListRef = useRef<FlatList>(null);
   const textListRef = useRef<FlatList>(null);
@@ -56,29 +215,74 @@ export default function Viewer() {
   // Track expanded text panels on individual pages in "pages" mode
   const [expandedTextPages, setExpandedTextPages] = useState<Record<number, boolean>>({});
 
-  // Render thumbnails
+  // Handle Android hardware back press when modals or search bar are open
   useEffect(() => {
+    const onBackPress = () => {
+      if (jumpOpen) {
+        setJumpOpen(false);
+        return true;
+      }
+      if (gridOpen) {
+        setGridOpen(false);
+        return true;
+      }
+      if (searchOpen) {
+        setSearchOpen(false);
+        setSearchQuery('');
+        return true;
+      }
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [jumpOpen, gridOpen, searchOpen]);
+
+  // Render thumbnails at optimal capped width to preserve memory on long PDFs
+  useEffect(() => {
+    if (!uri) {
+      setError('No PDF file specified.');
+      return;
+    }
     let live = true;
-    renderThumbnails(uri, Math.round(pageW * PixelRatio.get()))
+    const targetW = Math.min(720, Math.round(pageW * 1.8));
+    renderThumbnails(uri, targetW)
       .then((p) => live && setPages(p))
       .catch(() => live && setError('This PDF can’t be shown. It may be password-protected or damaged.'));
     return () => { live = false; };
   }, [uri, pageW]);
 
-  // Extract text in parallel
+  // Extract text in background AFTER pages are displayed, or when search is triggered
   useEffect(() => {
+    if (!uri || !pages) return;
     let live = true;
-    readPicked(uri)
-      .then((bytes) => extractAllText(bytes))
-      .then((res) => { if (live) setPageTexts(res); })
-      .catch((e) => console.warn('Text extraction error:', e));
-    return () => { live = false; };
-  }, [uri]);
+    const timer = setTimeout(() => {
+      readPicked(uri)
+        .then((bytes) => extractAllText(bytes))
+        .then((res) => { if (live) setPageTexts(res); })
+        .catch((e) => console.warn('Text extraction error:', e));
+    }, 350);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [uri, !!pages]);
 
-  // Compute search matches
+  // If user opens search or text mode immediately, trigger extraction right away
+  useEffect(() => {
+    if (!uri || pageTexts.length > 0) return;
+    if (searchOpen || mode === 'text') {
+      readPicked(uri)
+        .then((bytes) => extractAllText(bytes))
+        .then((res) => setPageTexts(res))
+        .catch((e) => console.warn('Text extraction error:', e));
+    }
+  }, [uri, searchOpen, mode, pageTexts.length]);
+
+  // Compute search matches with useMemo
   const needle = searchQuery.trim().toLowerCase();
-  const matches: SearchMatch[] = [];
-  if (needle && pageTexts.length > 0) {
+  const matches = useMemo(() => {
+    if (!needle || pageTexts.length === 0) return [];
+    const results: SearchMatch[] = [];
     pageTexts.forEach((pt) => {
       const lower = pt.text.toLowerCase();
       let pos = lower.indexOf(needle);
@@ -86,11 +290,23 @@ export default function Viewer() {
         const start = Math.max(0, pos - 30);
         const end = Math.min(pt.text.length, pos + needle.length + 30);
         const snippet = (start > 0 ? '…' : '') + pt.text.slice(start, end).trim() + (end < pt.text.length ? '…' : '');
-        matches.push({ pageIndex: pt.pageIndex, pageNumber: pt.pageIndex + 1, snippet });
+        results.push({ pageIndex: pt.pageIndex, pageNumber: pt.pageIndex + 1, snippet });
         pos = lower.indexOf(needle, pos + needle.length);
       }
     });
-  }
+    return results;
+  }, [needle, pageTexts]);
+
+  const searchHitIndices = useMemo(() => {
+    if (!needle || matches.length === 0) return new Set<number>();
+    return new Set(matches.map((m) => m.pageIndex));
+  }, [needle, matches]);
+
+  const pageTextsMap = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const pt of pageTexts) map.set(pt.pageIndex, pt.text);
+    return map;
+  }, [pageTexts]);
 
   // Scroll to current search match
   const scrollToPage = useCallback((pageIndex: number) => {
@@ -130,34 +346,28 @@ export default function Viewer() {
     }
   };
 
-  // Copy or share text
-  const copyPageText = (text: string, pageNum: number) => {
+  // Callbacks
+  const handleToggleExpand = useCallback((idx: number) => {
+    setExpandedTextPages((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  }, []);
+
+  const handleCopyText = useCallback((text: string, pageNum: number) => {
     if (!text) return;
     Share.share({
       message: text,
       title: `${name} — Page ${pageNum}`,
     });
-  };
+  }, [name]);
 
-  const copyAllText = () => {
-    const all = pageTexts
-      .map((p) => `--- Page ${p.pageIndex + 1} ---\n${p.text}`)
-      .join('\n\n');
-    if (!all.trim()) return;
-    Share.share({
-      message: all,
-      title: `${name} — Extracted Text`,
-    });
-  };
-
-  const togglePageTextExpand = (idx: number) => {
-    setExpandedTextPages((prev) => ({ ...prev, [idx]: !prev[idx] }));
-  };
+  const handleSelectGridPage = useCallback((index: number) => {
+    setGridOpen(false);
+    scrollToPage(index);
+  }, [scrollToPage]);
 
   const hasAnyText = pageTexts.some((p) => p.text.length > 0);
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={s.root}>
+    <SafeAreaView edges={['top', 'bottom']} style={[s.root, { backgroundColor: c.surface }]}>
       {/* ── Top Header Bar ── */}
       <View style={s.bar}>
         <IconBtn name="chevron-left" size={24} onPress={() => (router.canGoBack() ? router.back() : router.replace('/files'))} />
@@ -254,77 +464,29 @@ export default function Viewer() {
             data={pages}
             keyExtractor={(p) => p.uri}
             contentContainerStyle={s.list}
-            initialNumToRender={3}
-            windowSize={5}
+            initialNumToRender={2}
+            maxToRenderPerBatch={3}
+            windowSize={4}
+            updateCellsBatchingPeriod={40}
+            removeClippedSubviews={Platform.OS === 'android'}
             onScrollToIndexFailed={(info) => {
               flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
             }}
-            renderItem={({ item, index }) => {
-              const textObj = pageTexts.find((pt) => pt.pageIndex === index);
-              const hasText = !!textObj?.text;
-              const isExpanded = !!expandedTextPages[index];
-              const isSearchHit = needle && textObj?.text.toLowerCase().includes(needle);
-              const imgW = pageW * zoom;
-              const imgH = ((pageW * item.height) / item.width) * zoom;
-
-              return (
-                <View style={s.pageWrapper}>
-                  {/* Search Hit Banner */}
-                  {isSearchHit && (
-                    <View style={s.hitBanner}>
-                      <Icon name="check-circle-outline" size={14} color={c.accent} />
-                      <Text style={s.hitBannerText}>Search match on this page</Text>
-                    </View>
-                  )}
-
-                  {/* Rendered Page Image (Scrollable horizontally when zoomed) */}
-                  {zoom > 1 ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      <Image source={{ uri: item.uri }} style={[s.page, { width: imgW, height: imgH }]} resizeMode="contain" />
-                    </ScrollView>
-                  ) : (
-                    <Image source={{ uri: item.uri }} style={[s.page, { width: imgW, height: imgH }]} resizeMode="contain" />
-                  )}
-
-                  {/* Page Footer Info & Selectable Text Trigger */}
-                  <View style={s.pageFooter}>
-                    <Text style={s.pageNo}>Page {index + 1} of {pages.length}</Text>
-                    {hasText && (
-                      <Pressable onPress={() => togglePageTextExpand(index)} style={s.selectTextToggle}>
-                        <Icon name={isExpanded ? 'chevron-up' : 'format-text'} size={15} color={c.accent} />
-                        <Text style={s.selectTextToggleLabel}>
-                          {isExpanded ? 'Hide text' : 'Select / copy text'}
-                        </Text>
-                      </Pressable>
-                    )}
-                  </View>
-
-                  {/* Expandable Selectable Text Card */}
-                  {isExpanded && hasText && (
-                    <View style={s.inlineTextBox}>
-                      <View style={s.inlineTextHead}>
-                        <Text style={s.inlineTextTitle}>Selectable Page Text:</Text>
-                        <Pressable onPress={() => copyPageText(textObj.text, index + 1)} style={s.inlineCopyBtn}>
-                          <Icon name="content-copy" size={13} color={c.ink} />
-                          <Text style={s.inlineCopyText}>Share text</Text>
-                        </Pressable>
-                      </View>
-                      <TextInput
-                        value={textObj.text}
-                        editable={false}
-                        multiline
-                        scrollEnabled={false}
-                        showSoftInputOnFocus={false}
-                        contextMenuHidden={false}
-                        selectionColor={c.accent}
-                        cursorColor={c.accent}
-                        style={s.selectableContent}
-                      />
-                    </View>
-                  )}
-                </View>
-              );
-            }}
+            renderItem={({ item, index }) => (
+              <PageItem
+                key={item.uri}
+                item={item}
+                index={index}
+                totalPages={pages.length}
+                pageW={pageW}
+                zoom={zoom}
+                text={pageTextsMap.get(index)}
+                isExpanded={!!expandedTextPages[index]}
+                isSearchHit={searchHitIndices.has(index)}
+                onToggleExpand={handleToggleExpand}
+                onCopyText={handleCopyText}
+              />
+            )}
           />
         ) : (
           /* ── Dedicated Selectable Text View ── */
@@ -333,8 +495,11 @@ export default function Viewer() {
             data={pages}
             keyExtractor={(_, i) => `text-page-${i}`}
             contentContainerStyle={s.list}
-            initialNumToRender={5}
-            windowSize={5}
+            initialNumToRender={4}
+            maxToRenderPerBatch={4}
+            windowSize={4}
+            updateCellsBatchingPeriod={40}
+            removeClippedSubviews={Platform.OS === 'android'}
             onScrollToIndexFailed={(info) => {
               textListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
             }}
@@ -355,50 +520,35 @@ export default function Viewer() {
                 </View>
               )
             }
-            renderItem={({ index }) => {
-              const textObj = pageTexts.find((pt) => pt.pageIndex === index);
-              const rawText = textObj?.text || '';
-              const isSearchHit = needle && rawText.toLowerCase().includes(needle);
-
-              return (
-                <View style={[s.textCard, isSearchHit && s.textCardHighlighted]}>
-                  <View style={s.textCardHead}>
-                    <View style={s.textCardHeadLeft}>
-                      <Icon name="file-document-outline" size={16} color={c.accent} />
-                      <Text style={s.textCardPage}>Page {index + 1} of {pages.length}</Text>
-                    </View>
-                    {!!rawText && (
-                      <Pressable onPress={() => copyPageText(rawText, index + 1)} style={s.inlineCopyBtn}>
-                        <Icon name="content-copy" size={13} color={c.ink} />
-                        <Text style={s.inlineCopyText}>Share page</Text>
-                      </Pressable>
-                    )}
-                  </View>
-
-                  {rawText ? (
-                    <TextInput
-                      value={rawText}
-                      editable={false}
-                      multiline
-                      scrollEnabled={false}
-                      showSoftInputOnFocus={false}
-                      contextMenuHidden={false}
-                      selectionColor={c.accent}
-                      cursorColor={c.accent}
-                      style={s.selectableContent}
-                    />
-                  ) : (
-                    <Text style={s.emptyPageText}>No text detected on this page.</Text>
-                  )}
-                </View>
-              );
-            }}
+            renderItem={({ index }) => (
+              <TextPageItem
+                key={`text-${index}`}
+                index={index}
+                totalPages={pages.length}
+                text={pageTextsMap.get(index)}
+                isSearchHit={searchHitIndices.has(index)}
+                onCopyText={handleCopyText}
+              />
+            )}
           />
         )
       ) : error ? (
         <View style={s.center}>
           <Text style={s.msg}>{error}</Text>
-          <Button icon="share-variant-outline" label="Share instead" onPress={() => share(file)} style={{ alignSelf: 'stretch', marginTop: 18 }} />
+          {!!uri && (
+            <Button
+              icon="share-variant-outline"
+              label="Share instead"
+              onPress={() => share(file)}
+              style={{ alignSelf: 'stretch', marginTop: 18 }}
+            />
+          )}
+          <Button
+            label="Back to Files"
+            variant="secondary"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/files'))}
+            style={{ alignSelf: 'stretch', marginTop: 10 }}
+          />
         </View>
       ) : (
         <View style={s.center}>
@@ -443,28 +593,30 @@ export default function Viewer() {
 
       {/* ── Thumbnails Grid Overview Modal ── */}
       <Modal visible={gridOpen} animationType="slide" onRequestClose={() => setGridOpen(false)}>
-        <SafeAreaView edges={['top', 'bottom']} style={[s.root, { backgroundColor: c.bg }]}>
+        <SafeAreaView edges={['top', 'bottom']} style={[s.root, { backgroundColor: c.surface }]}>
           <View style={s.bar}>
             <IconBtn name="close" size={22} onPress={() => setGridOpen(false)} />
             <Text style={s.name}>All Pages ({pages?.length || 0})</Text>
             <View style={{ width: 36 }} />
           </View>
           <FlatList
+            style={{ flex: 1, backgroundColor: c.bg }}
             data={pages || []}
             numColumns={3}
             keyExtractor={(_, i) => `grid-${i}`}
             contentContainerStyle={s.gridContainer}
+            initialNumToRender={12}
+            maxToRenderPerBatch={9}
+            windowSize={5}
+            updateCellsBatchingPeriod={40}
+            removeClippedSubviews={Platform.OS === 'android'}
+            getItemLayout={(_, index) => ({
+              length: 150,
+              offset: 150 * Math.floor(index / 3),
+              index,
+            })}
             renderItem={({ item, index }) => (
-              <Pressable
-                onPress={() => {
-                  setGridOpen(false);
-                  scrollToPage(index);
-                }}
-                style={s.gridTile}
-              >
-                <Image source={{ uri: item.uri }} style={s.gridThumb} resizeMode="contain" />
-                <Text style={s.gridPageNo}>{index + 1}</Text>
-              </Pressable>
+              <GridTile item={item} index={index} onSelect={handleSelectGridPage} />
             )}
           />
         </SafeAreaView>

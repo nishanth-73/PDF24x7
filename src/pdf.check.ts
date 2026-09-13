@@ -58,6 +58,11 @@ const org = await PDFDocument.load(await P.organize(src, [{ i: 5, rot: 90 }, { i
 assert.equal(org.getPageCount(), 2);
 assert.equal(org.getPage(0).getRotation().angle, 90);
 assert.equal(await count(await P.imagesToPdf([photo, photo])), 2);
+await assert.rejects(P.imagesToPdf([]));
+const extracted = await P.extractAllText(src);
+assert.equal(extracted.length, 6);
+assert.ok(extracted[0].text.includes('Chapter 1'));
+assert.ok(extracted[3].text.includes('Chapter 4'));
 assert.deepEqual((await P.pageInfo(src))[0], { width: 400, height: 600, rot: 0 });
 const z = P.zip([f(src), f(src)]);
 assert.equal(String.fromCharCode(z[0], z[1]), 'PK');

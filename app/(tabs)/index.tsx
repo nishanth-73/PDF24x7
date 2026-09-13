@@ -21,7 +21,12 @@ export default function Home() {
   const { c } = useTheme();
   const [q, setQ] = useState('');
   const [recent, setRecent] = useState<Saved[]>([]);
-  useFocusEffect(useCallback(() => { setRecent(listAllFiles().slice(0, 3)); }, []));
+  const [allFiles, setAllFiles] = useState<Saved[]>([]);
+  useFocusEffect(useCallback(() => {
+    const loaded = listAllFiles();
+    setAllFiles(loaded);
+    setRecent(loaded.slice(0, 3));
+  }, []));
 
   const needle = q.trim().toLowerCase();
   const tokens = needle ? needle.split(/\s+/).filter(Boolean) : [];
@@ -31,9 +36,9 @@ export default function Home() {
     ? TOOLS.filter((t) => tokenMatch(`${t.title} ${t.desc}`, tokens))
     : TOOLS;
 
-  // Search files: when query is active, match files by name
+  // Search files: when query is active, match files by name from cached state
   const fileResults = tokens.length
-    ? listAllFiles().filter((f) => tokenMatch(f.name, tokens))
+    ? allFiles.filter((f) => tokenMatch(f.name, tokens))
     : [];
 
   const hasResults = toolResults.length > 0 || fileResults.length > 0;

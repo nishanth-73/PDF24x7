@@ -39,12 +39,13 @@ export function renameFolder(uri: string, newName: string): void {
   if (!clean) return;
   try {
     const d = new Directory(uri);
-    if (d.exists) {
-      try {
-        d.rename(clean);
-      } catch {
-        d.moveSync(new Directory(rootFolder(), clean));
-      }
+    if (!d.exists || d.name === clean) return;
+    const target = new Directory(rootFolder(), clean);
+    if (target.exists) return; // avoid collision with an existing folder
+    try {
+      d.rename(clean);
+    } catch {
+      d.moveSync(target);
     }
   } catch (e) {
     console.warn('renameFolder failed:', e);
@@ -53,6 +54,12 @@ export function renameFolder(uri: string, newName: string): void {
 
 export function removeFolder(uri: string): void {
   try {
+    const rootUri = rootFolder().uri;
+    // Safety guard: ONLY delete folders inside the app's 'PDF Tools' directory.
+    if (!uri.startsWith(rootUri)) {
+      console.warn('Blocked attempt to delete folder outside PDF Tools directory:', uri);
+      return;
+    }
     const d = new Directory(uri);
     if (d.exists) d.delete();
   } catch (e) {
@@ -66,7 +73,13 @@ export function moveFile(fileUri: string, folderUri: string): void {
     if (f.exists) {
       const targetDir = new Directory(folderUri);
       if (!targetDir.exists) targetDir.create({ intermediates: true, idempotent: true });
-      const targetFile = new File(targetDir, f.name);
+      let targetFile = new File(targetDir, f.name);
+      if (targetFile.exists) {
+        const dot = f.name.lastIndexOf('.');
+        const base = dot > 0 ? f.name.slice(0, dot) : f.name;
+        const ext = dot > 0 ? f.name.slice(dot + 1) : 'pdf';
+        for (let i = 2; targetFile.exists; i++) targetFile = new File(targetDir, `${base} (${i}).${ext}`);
+      }
       try {
         f.moveSync(targetFile);
       } catch {
@@ -83,7 +96,13 @@ export function moveFileToRoot(fileUri: string): void {
     const f = new File(fileUri);
     if (f.exists) {
       const root = rootFolder();
-      const targetFile = new File(root, f.name);
+      let targetFile = new File(root, f.name);
+      if (targetFile.exists) {
+        const dot = f.name.lastIndexOf('.');
+        const base = dot > 0 ? f.name.slice(0, dot) : f.name;
+        const ext = dot > 0 ? f.name.slice(dot + 1) : 'pdf';
+        for (let i = 2; targetFile.exists; i++) targetFile = new File(root, `${base} (${i}).${ext}`);
+      }
       try {
         f.moveSync(targetFile);
       } catch {
@@ -100,11 +119,11 @@ export function moveFileToRoot(fileUri: string): void {
 // Never overwrites: "Report-merged.pdf" becomes "Report-merged (2).pdf" if taken.
 export function save(base: string, ext: string, bytes: Uint8Array, folderUri?: string): Saved & { bytes: Uint8Array } {
   const d = folderUri ? new Directory(folderUri) : rootFolder();
-  if (!d.exists) d.create();
+  if (!d.exists) d.create({ intermediates: true, idempotent: true });
   const clean = base.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document';
   let f = new File(d, `${clean}.${ext}`);
   for (let i = 2; f.exists; i++) f = new File(d, `${clean} (${i}).${ext}`);
-  f.create();
+  f.create({ overwrite: true });
   f.write(bytes);
   return { name: f.name, uri: f.uri, size: bytes.length, modified: Date.now(), bytes };
 }
@@ -136,18 +155,59 @@ export function listAllFiles(): Saved[] {
 // ("Missing 'READ' permission"), so read them through fetch, which handles file:// and content://.
 // ponytail: RN reads the blob via a base64 data URL, so a very large PDF briefly costs ~2× its size in memory.
 export async function readPicked(uri: string): Promise<Uint8Array> {
+  try {
+    const f = new File(uri);
+    if (f.exists) {
+      const buf = await f.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+  } catch {}
   const res = await fetch(uri);
   return new Uint8Array(await res.arrayBuffer());
 }
 
-export const removeFile = (uri: string) => new File(uri).delete();
-export const clearFiles = () => rootFolder().delete();
+export function removeFile(uri: string): void {
+  try {
+    const rootUri = rootFolder().uri;
+    // Safety guard: ONLY delete files located inside the app's 'PDF Tools' directory.
+    // NEVER delete user's original files stored in user space (Downloads, Drive, device storage)!
+    if (!uri.startsWith(rootUri)) {
+      console.warn('Blocked attempt to delete file outside PDF Tools directory:', uri);
+      return;
+    }
+    const f = new File(uri);
+    if (f.exists) f.delete();
+  } catch (e) {
+    console.warn('removeFile failed:', e);
+  }
+}
+
+export function clearFiles(): void {
+  try {
+    const root = rootFolder();
+    if (root.exists) root.delete();
+    rootFolder(); // recreate clean directory
+  } catch (e) {
+    console.warn('clearFiles failed:', e);
+  }
+}
+
+// Preview outputs live in cache and are replaced each time, so nothing lands in Files until the user runs the tool.
+export function saveTemp(name: string, bytes: Uint8Array) {
+  const d = new Directory(Paths.cache, 'preview');
+  if (d.exists) d.delete();
+  d.create({ intermediates: true, idempotent: true });
+  const f = new File(d, `${Date.now()}.pdf`); // fresh path each time so the thumbnail cache never serves a stale render
+  f.create();
+  f.write(bytes);
+  return { name, uri: f.uri };
+}
 
 // Tap-to-open: PDFs go to the in-app viewer; ZIPs can't be viewed, so they go to the share sheet.
 export const openFile = (f: { name: string; uri: string }) =>
   f.name.toLowerCase().endsWith('.zip') ? share(f) : router.push({ pathname: '/view', params: { uri: f.uri, name: f.name } });
 
 export const share = (f: { name: string; uri: string }) =>
-  Sharing.shareAsync(f.uri, f.name.endsWith('.zip')
+  Sharing.shareAsync(f.uri, f.name.toLowerCase().endsWith('.zip')
     ? { mimeType: 'application/zip', UTI: 'public.zip-archive' }
     : { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });

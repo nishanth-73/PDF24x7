@@ -37,7 +37,8 @@
         }
       ],
       "expo-router",
-      "./plugins/withMaxRefreshRate"
+      "./plugins/withMaxRefreshRate",
+      "./plugins/withArm64Only"
     ]
   }
 }

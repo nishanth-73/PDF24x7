@@ -1,7 +1,7 @@
 // Every operation runs on-device with pure-JS libs: bytes in, bytes out.
 import {
   PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFStream, PDFString,
-  StandardFonts, decodePDFRawStream, degrees, rgb,
+  StandardFontEmbedder, StandardFonts, decodePDFRawStream, degrees, rgb,
 } from 'pdf-lib';
 import type { PDFObject, PDFPage } from 'pdf-lib';
 import { zipSync } from 'fflate';
@@ -152,16 +152,22 @@ export type PageTextResult = { pageIndex: number; text: string };
 export async function extractAllText(bytes: Uint8Array): Promise<PageTextResult[]> {
   try {
     const doc = await load(bytes);
-    return doc.getPages().map((p, i) => {
+    const pages = doc.getPages();
+    const results: PageTextResult[] = [];
+    for (let i = 0; i < pages.length; i++) {
+      if (i > 0 && i % 5 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
       let t = '';
       try {
-        t = pageText(p)
+        t = pageText(pages[i])
           .replace(/[ \t]+/g, ' ')
           .replace(/\n\s*\n\s*/g, '\n\n')
           .trim();
       } catch {}
-      return { pageIndex: i, text: t };
-    });
+      results.push({ pageIndex: i, text: t });
+    }
+    return results;
   } catch {
     return [];
   }
@@ -351,15 +357,21 @@ export async function cropResize(
   return out.save();
 }
 
-export async function watermark(bytes: Uint8Array, { text = 'CONFIDENTIAL', opacity = 0.15 }: { text?: string; opacity?: Num } = {}) {
+// Diagonal watermark geometry in page points; the tool preview uses it too so both match.
+export function watermarkLayout(text: string, width: number, height: number, scale: Num = 1) {
+  const w1 = StandardFontEmbedder.for(StandardFonts.HelveticaBold as unknown as Parameters<typeof StandardFontEmbedder.for>[0]).widthOfTextAtSize(text, 1);
+  const k = Number(scale) || 1;
+  const size = Math.min(110 * k, (Math.hypot(width, height) * 0.65 * k) / w1);
+  return { angle: Math.atan2(height, width), size, textWidth: w1 * size };
+}
+
+export async function watermark(bytes: Uint8Array, { text = 'CONFIDENTIAL', opacity = 0.15, scale = 1 }: { text?: string; opacity?: Num; scale?: Num } = {}) {
   if (!text.trim()) throw new Error('Enter watermark text.');
   const doc = await load(bytes);
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
   doc.getPages().forEach((p) => {
     const { width, height } = p.getSize();
-    const a = Math.atan2(height, width);
-    const size = Math.min(110, (Math.hypot(width, height) * 0.65) / font.widthOfTextAtSize(text, 1));
-    const tw = font.widthOfTextAtSize(text, size);
+    const { angle: a, size, textWidth: tw } = watermarkLayout(text, width, height, scale);
     const c = Math.cos(a);
     const s = Math.sin(a);
     const up = size * 0.35;
@@ -398,11 +410,12 @@ export async function organize(bytes: Uint8Array, order: PageOrder[]) {
 
 // Scans: each photo becomes one page, A4 wide, keeping the photo's aspect.
 export async function imagesToPdf(images: Uint8Array[]) {
+  if (!images.length) throw new Error('At least one image is required to create a PDF.');
   const doc = await PDFDocument.create();
   for (const bytes of images) {
     const img = bytes[0] === 0x89 ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
     const W = A4[0];
-    const H = (W * img.height) / img.width;
+    const H = img.width > 0 ? (W * img.height) / img.width : A4[1];
     doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
   }
   return doc.save();

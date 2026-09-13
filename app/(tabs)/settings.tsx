@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
-import { clearFiles, listFiles, type Saved } from '../../src/storage';
+import { clearFiles, listAllFiles, type Saved } from '../../src/storage';
 import { ConfirmModal, Group, GroupLabel, Icon, LargeTitle, Row, Screen, fmtSize, plural } from '../../src/ui';
 import { fonts, makeStyles, palettes, radius, typo, useTheme, type Palette, type ThemePref } from '../../src/theme';
 import type { IconName } from '../../src/tools';
@@ -15,7 +15,7 @@ export default function SettingsTab() {
   const { c } = useTheme();
   const [files, setFiles] = useState<Saved[]>([]);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  useFocusEffect(useCallback(() => { setFiles(listFiles()); }, []));
+  useFocusEffect(useCallback(() => { setFiles(listAllFiles()); }, []));
   const total = files.reduce((sum, f) => sum + f.size, 0);
 
   const lead = (name: IconName, danger?: boolean) => (

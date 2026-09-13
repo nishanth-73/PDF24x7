@@ -1,21 +1,22 @@
 // One screen body for every tool: pick input -> set options -> run -> share results.
-import { useEffect, useState, type ComponentType } from 'react';
+import { memo, useCallback, useEffect, useState, type ComponentType } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { pageInfo, zip, type PageInfo, type PageOrder } from './pdf';
-import { STEPS, defaults, type Opts, type Tool, type WorkflowStep } from './tools';
-import { openFile, readPicked, save, share, type Saved } from './storage';
+import { pageInfo, watermarkLayout, zip, type PageInfo, type PageOrder } from './pdf';
+import { defaults, stepTools, toolById, type Opts, type Tool, type WorkflowStep } from './tools';
+import { openFile, readPicked, save, saveTemp, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from './art';
 import { renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
 import {
   Button, DragHandle, Group, GroupLabel, Icon, IconBtn, LargeTitle, Options, Reorderable, Row, StepHead,
   fmtSize, moveActions, pad, plural, swap,
 } from './ui';
+import { AppFilesPickerModal, type PickedFile } from './AppFilesPickerModal';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 
-type Picked = { name: string; uri: string; size?: number | null };
+type Picked = PickedFile;
 type Result = Saved & { bytes: Uint8Array };
 type EditorProps = { file?: Picked; value: Opts; onChange: (o: Opts) => void; onError: (msg: string) => void };
 
@@ -26,17 +27,19 @@ const stamp = () => {
 const stripPdf = (name: string) => name.replace(/\.pdf$/i, '');
 const GAP = 10; // organize grid gap
 const AREA_H = 180; // organize page preview height
+const PREVIEW_H = 320; // watermark preview max height
 
-const EDITORS: Record<string, ComponentType<EditorProps>> = { organize: OrganizeEditor, workflow: WorkflowEditor };
+const EDITORS: Record<string, ComponentType<EditorProps>> = { organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor };
 
 export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () => void }) {
   const s = useStyles();
   const { c } = useTheme();
   const [files, setFiles] = useState<Picked[]>([]);
   const [opts, setOpts] = useState<Opts>(() => defaults(tool.opts));
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'' | 'run' | 'preview'>('');
   const [error, setError] = useState('');
   const [results, setResults] = useState<Result[]>([]);
+  const [appFilesOpen, setAppFilesOpen] = useState(false);
   const Editor = EDITORS[tool.id];
   const multi = tool.input === 'pdfs';
   const images = tool.input === 'images';
@@ -64,8 +67,8 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
     changeFiles([...files, ...r.assets.map((a, i) => ({ name: `Page ${files.length + i + 1}`, uri: a.uri, size: a.fileSize }))]);
   };
 
-  const run = async () => {
-    setBusy(true);
+  const exec = async (mode: 'run' | 'preview') => {
+    setBusy(mode);
     setError('');
     setResults([]);
     await new Promise((r) => setTimeout(r, 60)); // let the spinner paint before heavy JS work
@@ -73,20 +76,34 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
       const inputs = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await readPicked(f.uri) })));
       const outs = await tool.run(inputs, opts);
       const base = images ? `Scan ${stamp()}` : stripPdf(files[0].name);
-      setResults(outs.map((o) => save(o.name ? `${base}-${o.name}` : base, o.ext ?? 'pdf', o.bytes)));
+      const nameOf = (o: { name: string; full?: boolean }) => (o.full ? o.name : o.name ? `${base}-${o.name}` : base);
+      // ponytail: multi-file outputs (splits) preview only the first part; add a picker if people ask for the rest.
+      if (mode === 'preview') openFile(saveTemp(`${nameOf(outs[0])} (preview).pdf`, outs[0].bytes));
+      else setResults(outs.map((o) => save(nameOf(o), o.ext ?? 'pdf', o.bytes)));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-    setBusy(false);
+    setBusy('');
   };
 
-  const shareAll = () => share(save(`${stripPdf(files[0].name)}-all`, 'zip', zip(results)));
+  const shareAll = () => {
+    const baseName = files[0]?.name ? stripPdf(files[0].name) : 'export';
+    share(save(`${baseName}-all`, 'zip', zip(results)));
+  };
   const busyLabel = images ? `Building a ${files.length}-page PDF…` : `${tool.doing}…`;
 
   const fileRow = (f: Picked, i: number, draggable: boolean) => (
-    <Row first={i === 0} lead={<DocGlyph kind="pdf" />} title={f.name} subtitle={fmtSize(f.size)}>
+    <Row
+      first={i === 0} title={f.name} subtitle={fmtSize(f.size)} marquee
+      lead={draggable ? <View style={s.fileLead}><Text style={s.fileNum}>{i + 1}</Text><DocGlyph kind="pdf" /></View> : <DocGlyph kind="pdf" />}
+    >
       <IconBtn name="close" onPress={() => remove(f)} />
-      {draggable && <DragHandle index={i} move={move} />}
+      {draggable && (
+        <>
+          <IconBtn name="chevron-up" color={i === 0 ? c.faint : c.ink} onPress={() => move(i, i - 1)} />
+          <IconBtn name="chevron-down" color={i === files.length - 1 ? c.faint : c.ink} onPress={() => move(i, i + 1)} />
+        </>
+      )}
     </Row>
   );
 
@@ -143,7 +160,7 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
             <Group>
               {multi && files.length > 1 ? (
                 <Reorderable
-                  data={files} keyOf={(f) => f.uri} onReorder={changeFiles} handle
+                  data={files} keyOf={(f) => f.uri} onReorder={changeFiles}
                   renderItem={(f, i) => <View style={s.rowBg}>{fileRow(f, i, true)}</View>}
                 />
               ) : (
@@ -151,15 +168,64 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
               )}
             </Group>
           )}
-          {(multi || !files.length) && (
-            <Pressable onPress={pickPdf} style={({ pressed }) => [s.drop, files.length > 0 && { marginTop: 10 }, pressed && { backgroundColor: c.sunken }]}>
-              <Icon name={files.length ? 'plus' : 'file-plus-outline'} size={26} color={c.ink} />
-              <Text style={s.dropTitle}>{files.length ? 'Add another PDF' : multi ? 'Choose PDF files' : 'Choose a PDF file'}</Text>
-              <Text style={s.dropSub}>
-                {multi ? `At least ${tool.min ?? 2}. Drag the handles to set the order.` : 'From Files, Drive or Downloads'}
-              </Text>
-            </Pressable>
+          {!files.length && (
+            <View style={s.pickerRow}>
+              <Pressable
+                onPress={pickPdf}
+                style={({ pressed }) => [s.pickerCard, pressed && { backgroundColor: c.sunken }]}
+              >
+                <View style={s.pickerIconBox}>
+                  <Icon name="file-document-outline" size={26} color={c.ink} />
+                </View>
+                <Text style={s.pickerTitle}>Device Storage</Text>
+                <Text style={s.pickerSub}>Drive, Downloads, Phone</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setAppFilesOpen(true)}
+                style={({ pressed }) => [s.pickerCard, pressed && { backgroundColor: c.sunken }]}
+              >
+                <View style={[s.pickerIconBox, { backgroundColor: c.accentSoft }]}>
+                  <Icon name="folder-outline" size={26} color={c.accent} />
+                </View>
+                <Text style={s.pickerTitle}>App Files</Text>
+                <Text style={s.pickerSub}>Saved in PDF Tools</Text>
+              </Pressable>
+            </View>
           )}
+
+          {multi && files.length > 1 && <Text style={[s.hint, { marginTop: 8 }]}>Use the arrows, or hold a file and drag it, to change the order.</Text>}
+          {multi && files.length > 0 && (
+            <View style={s.addMoreRow}>
+              <Pressable
+                onPress={pickPdf}
+                style={({ pressed }) => [s.addMoreBtn, pressed && { backgroundColor: c.sunken }]}
+              >
+                <Icon name="plus" size={18} color={c.ink} />
+                <Text style={s.addMoreText}>Add from Device</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setAppFilesOpen(true)}
+                style={({ pressed }) => [s.addMoreBtn, pressed && { backgroundColor: c.sunken }]}
+              >
+                <Icon name="folder-outline" size={18} color={c.accent} />
+                <Text style={s.addMoreText}>Add from App Files</Text>
+              </Pressable>
+            </View>
+          )}
+
+          <AppFilesPickerModal
+            visible={appFilesOpen}
+            multi={multi}
+            alreadySelectedUris={files.map((f) => f.uri)}
+            onClose={() => setAppFilesOpen(false)}
+            onSelect={(picked) => {
+              changeFiles(
+                multi
+                  ? [...files, ...picked.filter((p) => !files.some((x) => x.uri === p.uri))]
+                  : picked.slice(0, 1)
+              );
+            }}
+          />
 
           {(Editor || !!tool.opts?.length) && (
             <>
@@ -173,7 +239,13 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
       )}
 
       {(!images || files.length > 0) && (
-        <Button label={busy ? busyLabel : tool.cta} busy={busy} disabled={!ready} onPress={run} style={s.cta} />
+        <Button label={busy === 'run' ? busyLabel : tool.cta} busy={busy === 'run'} disabled={!ready || busy === 'preview'} onPress={() => exec('run')} style={s.cta} />
+      )}
+      {!images && !tool.noPreview && (
+        <Button
+          icon="eye-outline" label={busy === 'preview' ? 'Preparing preview…' : 'Preview result'} variant="secondary"
+          busy={busy === 'preview'} disabled={!ready || busy === 'run'} onPress={() => exec('preview')} style={{ marginTop: 10 }}
+        />
       )}
 
       {!!error && (
@@ -206,6 +278,55 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
   );
 }
 
+const OrganizeTile = memo(function OrganizeTile({
+  o, k, page, thumb, cell, move, onRotate, onDelete,
+}: {
+  o: PageOrder; k: number; page?: PageInfo; thumb?: Thumb; cell: number;
+  move: (from: number, to: number) => void;
+  onRotate: (index: number) => void;
+  onDelete: (index: number) => void;
+}) {
+  const s = useStyles();
+  const p = page ?? { width: 400, height: 600, rot: 0 };
+  const t = thumb;
+  const [bw, bh] = t ? [t.width, t.height] : p.rot % 180 ? [p.height, p.width] : [p.width, p.height];
+  const turned = o.rot % 180 !== 0;
+  const [w, h] = turned ? [bh, bw] : [bw, bh];
+  const fit = cell > 0 ? Math.min((cell - 16) / w, AREA_H / h) : 0.5;
+  const box = { width: w * fit, height: h * fit };
+  const img = turned ? { width: box.height, height: box.width } : box;
+
+  return (
+    <View style={s.pageCell}>
+      <View style={s.pageArea}>
+        {cell > 0 && (
+          <View style={[s.pageBox, box]}>
+            {t ? (
+              <Image
+                source={{ uri: t.uri }}
+                style={{
+                  position: 'absolute', ...img, left: (box.width - img.width) / 2, top: (box.height - img.height) / 2,
+                  transform: [{ rotate: `${o.rot}deg` }],
+                }}
+              />
+            ) : (
+              <Text style={s.pageNum}>{o.i + 1}</Text>
+            )}
+          </View>
+        )}
+        <Text style={s.pageBadge} accessibilityLabel={`Page ${o.i + 1}, position ${k + 1}`} {...moveActions(k, move)}>
+          {o.i + 1}
+        </Text>
+        {o.rot > 0 && <Text style={s.pageRot}>{o.rot}°</Text>}
+      </View>
+      <View style={s.pageTools}>
+        <IconBtn name="rotate-right" onPress={() => onRotate(k)} />
+        <IconBtn name="delete-outline" onPress={() => onDelete(k)} />
+      </View>
+    </View>
+  );
+});
+
 function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   const s = useStyles();
   const { c } = useTheme();
@@ -217,6 +338,14 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   const move = (from: number, to: number) => set(swap(order, from, to));
   const reset = (info: PageInfo[]) => set(info.map((_, i) => ({ i, rot: 0 })));
 
+  const handleRotate = useCallback((k: number) => {
+    set(order.map((x, j) => (j === k ? { ...x, rot: (x.rot + 90) % 360 } : x)));
+  }, [order]);
+
+  const handleDelete = useCallback((k: number) => {
+    set(order.filter((_, j) => j !== k));
+  }, [order]);
+
   useEffect(() => {
     if (!file) return;
     let live = true;
@@ -225,8 +354,8 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
     readPicked(file.uri).then(pageInfo)
       .then((info) => { if (live) { setPages(info); reset(info); } })
       .catch((e: Error) => live && onError(e.message));
-    // Page pictures arrive after the page list; until then, or if rendering fails (e.g. encrypted PDF), tiles show numbers.
-    renderThumbnails(file.uri).then((t) => live && setThumbs(t)).catch(() => {});
+    // Render lightweight 200px thumbnails for smooth, low-memory drag reordering
+    renderThumbnails(file.uri, 200).then((t) => live && setThumbs(t)).catch(() => {});
     return () => { live = false; };
   }, [file?.uri]);
 
@@ -242,48 +371,74 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
       <View onLayout={(e) => setCell(Math.floor((e.nativeEvent.layout.width - GAP) / 2))}>
         <Reorderable
           data={order} columns={2} gap={GAP} keyOf={(o) => String(o.i)} onReorder={set}
-          renderItem={(o, k) => {
-            const p = pages[o.i];
-            const t = thumbs?.[o.i];
-            // Base orientation: the rendered picture (already includes the page's own rotation), else the page size.
-            const [bw, bh] = t ? [t.width, t.height] : p.rot % 180 ? [p.height, p.width] : [p.width, p.height];
-            const turned = o.rot % 180 !== 0;
-            const [w, h] = turned ? [bh, bw] : [bw, bh];
-            const fit = Math.min((cell - 16) / w, AREA_H / h);
-            const box = { width: w * fit, height: h * fit };
-            const img = turned ? { width: box.height, height: box.width } : box;
-            return (
-              <View style={s.pageCell}>
-                <View style={s.pageArea}>
-                  {cell > 0 && (
-                    <View style={[s.pageBox, box]}>
-                      {t ? (
-                        <Image
-                          source={{ uri: t.uri }}
-                          style={{
-                            position: 'absolute', ...img, left: (box.width - img.width) / 2, top: (box.height - img.height) / 2,
-                            transform: [{ rotate: `${o.rot}deg` }],
-                          }}
-                        />
-                      ) : (
-                        <Text style={s.pageNum}>{o.i + 1}</Text>
-                      )}
-                    </View>
-                  )}
-                  <Text style={s.pageBadge} accessibilityLabel={`Page ${o.i + 1}, position ${k + 1}`} {...moveActions(k, move)}>
-                    {o.i + 1}
-                  </Text>
-                  {o.rot > 0 && <Text style={s.pageRot}>{o.rot}°</Text>}
-                </View>
-                <View style={s.pageTools}>
-                  <IconBtn name="rotate-right" onPress={() => set(order.map((x, j) => (j === k ? { ...x, rot: (x.rot + 90) % 360 } : x)))} />
-                  <IconBtn name="delete-outline" onPress={() => set(order.filter((_, j) => j !== k))} />
-                </View>
-              </View>
-            );
-          }}
+          renderItem={(o, k) => (
+            <OrganizeTile
+              key={o.i}
+              o={o}
+              k={k}
+              page={pages[o.i]}
+              thumb={thumbs?.[o.i]}
+              cell={cell}
+              move={move}
+              onRotate={handleRotate}
+              onDelete={handleDelete}
+            />
+          )}
         />
       </View>
+    </>
+  );
+}
+
+function WatermarkEditor({ file, value, onChange, onError }: EditorProps) {
+  const s = useStyles();
+  const { c } = useTheme();
+  const [page, setPage] = useState<{ info: PageInfo; thumb: Thumb } | null>(null);
+  const [areaW, setAreaW] = useState(0);
+  const text = String(value.text ?? '');
+
+  useEffect(() => {
+    setPage(null);
+    if (!file) return;
+    let live = true;
+    // ponytail: renders every page to show page 1; add a first-page-only native call if big PDFs feel slow.
+    Promise.all([readPicked(file.uri).then(pageInfo), renderThumbnails(file.uri, 480)])
+      .then(([info, thumbs]) => { if (live && info[0] && thumbs[0]) setPage({ info: info[0], thumb: thumbs[0] }); })
+      .catch((e: Error) => live && onError(e.message));
+    return () => { live = false; };
+  }, [file?.uri]);
+
+  const preview = () => {
+    if (!file) return <Text style={s.hint}>Choose a PDF to preview the watermark on its first page.</Text>;
+    if (!page || !areaW) return <ActivityIndicator color={c.ink} />;
+    const { info: p, thumb: t } = page;
+    const fit = Math.min(areaW / t.width, PREVIEW_H / t.height);
+    const [w, h] = [t.width * fit, t.height * fit];
+    const k = Math.hypot(w, h) / Math.hypot(p.width, p.height); // page points -> preview px
+    const L = text.trim() ? watermarkLayout(text, p.width, p.height, value.scale) : null;
+    return (
+      <View style={[s.pageBox, { width: w, height: h }]}>
+        <Image source={{ uri: t.uri }} style={StyleSheet.absoluteFill} />
+        {L && (
+          <Text
+            numberOfLines={1}
+            style={[s.wmText, {
+              width: L.textWidth * k * 1.3, fontSize: L.size * k, lineHeight: L.size * k * 1.2, opacity: Number(value.opacity),
+              transform: [{ rotate: `${p.rot - (L.angle * 180) / Math.PI}deg` }], // PDF angles run counter-clockwise
+            }]}
+          >
+            {text}
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <>
+      <View style={s.wmArea} onLayout={(e) => setAreaW(e.nativeEvent.layout.width - 24)}>{preview()}</View>
+      <Text style={[s.hint, { textAlign: 'center', marginTop: 6, marginBottom: 14 }]}>Preview · page 1</Text>
+      <Options defs={toolById('watermark')!.opts!} value={value} onChange={onChange} />
     </>
   );
 }
@@ -302,28 +457,30 @@ function WorkflowEditor({ value, onChange }: EditorProps) {
           <View style={s.stepCard}>
             <View style={s.stepCardHead}>
               <Text style={s.stepNum}>{k + 1}</Text>
-              <Text style={s.stepCardTitle}>{STEPS[step.op].label}</Text>
+              <Text style={s.stepCardTitle}>{toolById(step.op)!.title}</Text>
               <IconBtn name="close" onPress={() => set(steps.filter((_, j) => j !== k))} />
               <DragHandle index={k} move={move} />
             </View>
             <Options
-              defs={STEPS[step.op].opts} value={step.opts}
+              defs={toolById(step.op)!.opts ?? []} value={step.opts}
               onChange={(o) => set(steps.map((x, j) => (j === k ? { ...x, opts: o } : x)))}
             />
           </View>
         )}
       />
       <Text style={[s.hint, { marginTop: steps.length ? 12 : 0, marginBottom: 10 }]}>
-        {steps.length ? 'Steps run top to bottom on the same file. Drag the handles to reorder. Add another:' : 'Pick the steps to run, in order:'}
+        {steps.length
+          ? 'Steps run top to bottom. Merge and Mix combine all files; other steps run on each file. Drag the handles to reorder. Add another:'
+          : 'Pick the steps to run, in order. Choose several PDFs to merge them first.'}
       </Text>
       <View style={s.addRow}>
-        {Object.entries(STEPS).map(([op, d]) => (
+        {stepTools().map((t) => (
           <Pressable
-            key={op} style={({ pressed }) => [s.addChip, pressed && { backgroundColor: c.sunken }]}
-            onPress={() => set([...steps, { id: `${op}-${Math.random()}`, op, opts: defaults(d.opts) }])}
+            key={t.id} style={({ pressed }) => [s.addChip, pressed && { backgroundColor: c.sunken }]}
+            onPress={() => set([...steps, { id: `${t.id}-${Math.random()}`, op: t.id, opts: defaults(t.opts) }])}
           >
             <Icon name="plus" size={14} color={c.ink} />
-            <Text style={s.addChipText}>{d.label}</Text>
+            <Text style={s.addChipText}>{t.title}</Text>
           </Pressable>
         ))}
       </View>
@@ -332,7 +489,7 @@ function WorkflowEditor({ value, onChange }: EditorProps) {
 }
 
 const useStyles = makeStyles((c) => ({
-  back: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginLeft: -6, marginTop: 4, marginBottom: 18 },
+  back: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginLeft: -6, marginTop: 0, marginBottom: 14 },
   backText: { fontFamily: fonts.med, fontSize: 16, color: c.ink },
   head: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   title: { ...typo.title, fontSize: 23, lineHeight: 30, color: c.accent, flex: 1 },
@@ -343,12 +500,51 @@ const useStyles = makeStyles((c) => ({
   },
   tipText: { ...typo.small, color: c.sub, flex: 1 },
   rowBg: { backgroundColor: c.surface },
+  fileLead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  fileNum: { minWidth: 18, textAlign: 'center', fontFamily: fonts.bold, fontSize: 13, color: c.sub },
   drop: {
     alignItems: 'center', paddingVertical: 22, paddingHorizontal: 16, borderRadius: radius.group,
     borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.lineStrong, backgroundColor: c.surface,
   },
   dropTitle: { fontFamily: fonts.bold, fontSize: 15, color: c.ink, marginTop: 6 },
   dropSub: { ...typo.small, color: c.sub, marginTop: 2 },
+  pickerRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  pickerCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: radius.group,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: c.lineStrong,
+    backgroundColor: c.surface,
+    alignItems: 'center',
+  },
+  pickerIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.control,
+    backgroundColor: c.sunken,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  pickerTitle: { fontFamily: fonts.bold, fontSize: 14.5, color: c.ink },
+  pickerSub: { ...typo.small, color: c.sub, marginTop: 2, textAlign: 'center' },
+  addMoreRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  addMoreBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    borderColor: c.lineStrong,
+    backgroundColor: c.surface,
+  },
+  addMoreText: { fontFamily: fonts.med, fontSize: 13.5, color: c.ink },
   twoBtns: { flexDirection: 'row', gap: 10 },
   thumbs: { marginTop: 14 },
   thumb: { width: '100%', aspectRatio: 0.75, borderRadius: 8, overflow: 'hidden', backgroundColor: c.sunken },
@@ -381,6 +577,8 @@ const useStyles = makeStyles((c) => ({
     position: 'absolute', right: 6, top: 6, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, overflow: 'hidden',
     fontFamily: fonts.bold, fontSize: 11, color: c.onInk, backgroundColor: c.accent,
   },
+  wmArea: { minHeight: 120, padding: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.sunken, borderRadius: radius.group },
+  wmText: { position: 'absolute', textAlign: 'center', fontWeight: '700', color: '#D1452B', includeFontPadding: false }, // matches the stamped rgb
   pageTools: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 6 },
   stepCard: {
     padding: 14, paddingBottom: 0, borderRadius: radius.group,

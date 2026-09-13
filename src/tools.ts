@@ -13,7 +13,7 @@ export type OptDef = { key: string; label: string; when?: When } & (
   | { type: 'text'; def: string; placeholder?: string; keyboard?: KeyboardTypeOptions }
   | { type: 'toggle'; def: boolean }
 );
-export type Output = P.Named & { ext?: string };
+export type Output = P.Named & { ext?: string; full?: boolean }; // full: name already includes the source file name
 export type Tool = {
   id: string;
   section: number;
@@ -23,10 +23,10 @@ export type Tool = {
   doing: string; // shown on the button while it runs
   input: 'pdf' | 'pdfs' | 'images';
   min?: number;
+  noPreview?: boolean; // output isn't a PDF, or the editor already shows the result
   opts?: OptDef[];
   run: (inputs: P.Named[], opts: Opts) => Promise<Output[]>;
 };
-export type Step = { label: string; opts: OptDef[]; run: (bytes: Uint8Array, opts: Opts) => Promise<Uint8Array> };
 export type WorkflowStep = { id: string; op: string; opts: Opts };
 
 // Grouped by the job you're doing. "Capture" is shown as the Scan card on Home, and as a group only in search.
@@ -41,6 +41,7 @@ export const defaults = (defs: OptDef[] = []): Opts => Object.fromEntries(defs.m
 const O = {
   quality: seg('quality', 'Compression level', [['80', 'Light'], ['60', 'Balanced'], ['35', 'Strong']], '60'),
   wmText: text('text', 'Watermark text', 'CONFIDENTIAL', 'CONFIDENTIAL'),
+  wmScale: seg('scale', 'Size', [['0.6', 'Small'], ['1', 'Medium'], ['1.4', 'Large']], '1'),
   opacity: seg('opacity', 'Opacity', [['0.1', '10%'], ['0.2', '20%'], ['0.35', '35%']], '0.2'),
   numPos: seg('position', 'Position', [['left', 'Left'], ['center', 'Center'], ['right', 'Right']], 'center'),
   numFmt: seg('format', 'Format', [['n', '1, 2, 3'], ['of', 'Page 1 of N']], 'n'),
@@ -54,15 +55,32 @@ const one = (suffix: string, fn: BytesOp) => async ([f]: P.Named[], o: Opts): Pr
   [{ name: suffix, bytes: await fn(f.bytes, o) }];
 const many = (fn: (bytes: Uint8Array, o: Opts) => Promise<P.Named[]>) => async ([f]: P.Named[], o: Opts) => fn(f.bytes, o);
 
-// Chainable steps for the Workflow Builder.
-export const STEPS: Record<string, Step> = {
-  compress: { label: 'Compress', opts: [O.quality], run: P.compress },
-  watermark: { label: 'Watermark', opts: [O.wmText, O.opacity], run: P.watermark },
-  pageNumbers: { label: 'Page numbers', opts: [O.numPos, O.numFmt], run: P.pageNumbers },
-  rotate: { label: 'Rotate', opts: [O.angle], run: P.rotate },
-  flip: { label: 'Flip', opts: [O.axis], run: P.flip },
-  nUp: { label: 'Pages per sheet', opts: [O.perSheet], run: P.nUp },
-};
+// Workflow steps are the tools themselves: multi-PDF tools combine every current file,
+// single-PDF tools run on each file. Excluded: camera input, custom editor, non-PDF output.
+const NOT_STEPS = ['scan', 'workflow', 'organize', 'zip'];
+export const stepTools = () => TOOLS.filter((t) => !NOT_STEPS.includes(t.id));
+
+async function runWorkflow(files: P.Named[], steps: WorkflowStep[]): Promise<Output[]> {
+  if (!steps.length) throw new Error('Add at least one step.');
+  let cur = files.map((f) => ({ name: f.name.replace(/\.pdf$/i, ''), bytes: f.bytes }));
+  for (const step of steps) {
+    const t = toolById(step.op)!;
+    if (t.input === 'pdfs') {
+      const base = cur[0].name;
+      cur = (await t.run(cur, step.opts)).map((o) => ({ name: `${base}-${o.name}`, bytes: o.bytes }));
+      continue;
+    }
+    const next: P.Named[] = [];
+    for (const f of cur) { // one file at a time keeps memory flat
+      const outs = await t.run([f], step.opts);
+      next.push(...outs.map((o) => ({ name: outs.length > 1 ? `${f.name}-${o.name}` : f.name, bytes: o.bytes })));
+    }
+    cur = next;
+  }
+  return cur.length === 1
+    ? [{ name: 'processed', bytes: cur[0].bytes }]
+    : cur.map((f) => ({ name: `${f.name}-processed`, bytes: f.bytes, full: true }));
+}
 
 export const TOOLS: Tool[] = [
   {
@@ -72,15 +90,10 @@ export const TOOLS: Tool[] = [
     run: async (imgs) => [{ name: '', bytes: await P.imagesToPdf(imgs.map((i) => i.bytes)) }],
   },
   {
-    id: 'workflow', section: 3, input: 'pdf', cta: 'Run workflow', doing: 'Running your steps',
+    id: 'workflow', section: 3, input: 'pdfs', min: 1, cta: 'Run workflow', doing: 'Running your steps',
     title: 'PDF Workflow Builder',
-    desc: 'Upload once, chain multiple operations in sequence — compress, watermark, page numbers and more in one click.',
-    run: async ([f], { steps = [] }) => {
-      if (!steps.length) throw new Error('Add at least one step.');
-      let bytes = f.bytes;
-      for (const s of steps as WorkflowStep[]) bytes = await STEPS[s.op].run(bytes, s.opts);
-      return [{ name: 'processed', bytes }];
-    },
+    desc: 'Pick one or more PDFs, then chain any tools in order — merge, watermark, compress, split and more in one go.',
+    run: (files, { steps = [] }) => runWorkflow(files, steps),
   },
   {
     id: 'merge', section: 1, input: 'pdfs', cta: 'Merge PDFs', doing: 'Merging',
@@ -140,7 +153,7 @@ export const TOOLS: Tool[] = [
     run: many(P.splitBySize),
   },
   {
-    id: 'organize', section: 2, input: 'pdf', cta: 'Save pages', doing: 'Saving your page order',
+    id: 'organize', section: 2, noPreview: true, input: 'pdf', cta: 'Save pages', doing: 'Saving your page order',
     title: 'Organize Pages',
     desc: 'Rotate, delete, reorder, or rearrange PDF pages easily.',
     run: async ([f], { order = [] }) => [{ name: 'organized', bytes: await P.organize(f.bytes, order) }],
@@ -178,7 +191,7 @@ export const TOOLS: Tool[] = [
     run: one('resized', P.cropResize),
   },
   {
-    id: 'zip', section: 1, input: 'pdfs', min: 1, cta: 'Create ZIP', doing: 'Zipping',
+    id: 'zip', section: 1, noPreview: true, input: 'pdfs', min: 1, cta: 'Create ZIP', doing: 'Zipping',
     title: 'PDF to ZIP',
     desc: 'Bundle multiple PDFs into a single compressed ZIP archive — fully local, zero upload.',
     run: async (files) => [{ name: 'bundle', bytes: P.zip(files), ext: 'zip' }],
@@ -187,7 +200,7 @@ export const TOOLS: Tool[] = [
     id: 'watermark', section: 3, input: 'pdf', cta: 'Add watermark', doing: 'Stamping every page',
     title: 'Add Watermark',
     desc: 'Stamp diagonal text like CONFIDENTIAL or DRAFT across every page.',
-    opts: [O.wmText, O.opacity],
+    opts: [O.wmText, O.wmScale, O.opacity],
     run: one('watermarked', P.watermark),
   },
   {

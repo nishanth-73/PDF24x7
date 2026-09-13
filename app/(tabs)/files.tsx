@@ -21,6 +21,8 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
+type FolderWithCount = Folder & { fileCount: number };
+
 function applyFilter(files: Saved[], filter: Filter): Saved[] {
   if (filter === 'pdf') return files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
   if (filter === 'zip') return files.filter((f) => f.name.toLowerCase().endsWith('.zip'));
@@ -37,7 +39,8 @@ function applySearch(files: Saved[], query: string): Saved[] {
 export default function FilesTab() {
   const s = useStyles();
   const { c } = useTheme();
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folders, setFolders] = useState<FolderWithCount[]>([]);
+  const [allFolders, setAllFolders] = useState<FolderWithCount[]>([]);
   const [files, setFiles] = useState<Saved[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
@@ -60,7 +63,6 @@ export default function FilesTab() {
     message: string;
     confirmLabel: string;
     danger?: boolean;
-    requireTyping?: string;
     onConfirm: () => void;
   } | null>(null);
 
@@ -69,7 +71,12 @@ export default function FilesTab() {
   const [allFiles, setAllFiles] = useState<Saved[]>([]);
 
   const refresh = useCallback(() => {
-    setFolders(currentFolder ? [] : listFolders());
+    const loadedFolders = listFolders().map((f) => ({
+      ...f,
+      fileCount: listFiles(f.uri).length,
+    }));
+    setAllFolders(loadedFolders);
+    setFolders(currentFolder ? [] : loadedFolders);
     setFiles(listFiles(currentFolder?.uri));
     setAllFiles(listAllFiles());
   }, [currentFolder]);
@@ -136,7 +143,6 @@ export default function FilesTab() {
   }
 
   const hasContent = folders.length > 0 || filtered.length > 0;
-  const allAvailableFolders = listFolders();
 
   // ── Folder modal actions ────────────────────────────────────────────
 
@@ -155,7 +161,7 @@ export default function FilesTab() {
     });
   };
 
-  const openRenameFolderModal = (f: Folder) => {
+  const openRenameFolderModal = (f: FolderWithCount) => {
     setPromptConfig({
       visible: true,
       title: 'Rename Folder',
@@ -170,15 +176,14 @@ export default function FilesTab() {
     });
   };
 
-  const openDeleteFolderModal = (f: Folder) => {
-    const count = listFiles(f.uri).length;
+  const openDeleteFolderModal = (f: FolderWithCount) => {
+    const count = f.fileCount;
     setConfirmConfig({
       visible: true,
       title: 'Delete folder?',
       message: `"${f.name}" and ${count === 0 ? 'any files inside' : `${plural(count, 'file')} inside`} will be permanently deleted.`,
       confirmLabel: 'Delete',
       danger: true,
-      requireTyping: 'confirm',
       onConfirm: () => {
         removeFolder(f.uri);
         refresh();
@@ -193,7 +198,6 @@ export default function FilesTab() {
       message: `"${f.name}" will be removed from this phone. Copies you already shared are not affected.`,
       confirmLabel: 'Delete',
       danger: true,
-      requireTyping: 'confirm',
       onConfirm: () => {
         removeFile(f.uri);
         refresh();
@@ -243,7 +247,7 @@ export default function FilesTab() {
                 {folders.map((f, i) => (
                   <Row
                     key={f.uri} first={i === 0} lead={<FolderGlyph />} title={f.name}
-                    subtitle={`${plural(listFiles(f.uri).length, 'file')}`} onPress={() => enterFolder(f)}
+                    subtitle={`${plural(f.fileCount, 'file')}`} onPress={() => enterFolder(f)}
                     chevron
                   >
                     <IconBtn name="pencil-outline" size={16} color={c.sub} onPress={() => openRenameFolderModal(f)} />
@@ -336,7 +340,6 @@ export default function FilesTab() {
           message={confirmConfig.message}
           confirmLabel={confirmConfig.confirmLabel}
           danger={confirmConfig.danger}
-          requireTyping={confirmConfig.requireTyping}
           onConfirm={confirmConfig.onConfirm}
           onClose={() => setConfirmConfig(null)}
         />
@@ -369,7 +372,7 @@ export default function FilesTab() {
               </Pressable>
             )}
 
-            {allAvailableFolders
+            {allFolders
               .filter((f) => f.uri !== currentFolder?.uri)
               .map((f) => (
                 <Pressable
@@ -384,13 +387,13 @@ export default function FilesTab() {
                   <FolderGlyph size={28} />
                   <View style={{ flex: 1 }}>
                     <Text style={s.moveOptionTitle}>{f.name}</Text>
-                    <Text style={s.moveOptionSub}>{plural(listFiles(f.uri).length, 'file')}</Text>
+                    <Text style={s.moveOptionSub}>{plural(f.fileCount, 'file')}</Text>
                   </View>
                   <Icon name="chevron-right" size={20} color={c.faint} />
                 </Pressable>
               ))}
 
-            {allAvailableFolders.filter((f) => f.uri !== currentFolder?.uri).length === 0 && !currentFolder && (
+            {allFolders.filter((f) => f.uri !== currentFolder?.uri).length === 0 && !currentFolder && (
               <Text style={s.moveEmpty}>No folders exist yet. Create a folder first to organize files.</Text>
             )}
           </View>
