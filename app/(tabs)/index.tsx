@@ -7,7 +7,7 @@ import { ArtTile, DocGlyph, ToolArt, kindOf } from '../../src/art';
 import { Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
 
-const open = (t: Tool) => (t.id === 'scan' ? router.navigate('/scan') : router.push(`/tool/${t.id}`));
+const open = (t: Tool) => (t.id === 'scan' ? router.push('/scanner') : router.push(`/tool/${t.id}`));
 
 // Tokenized search: every word in the query must appear somewhere in the target string.
 // "split text" matches "Split PDF by Text", "compress pdf" matches "Compress PDF", etc.
@@ -57,7 +57,7 @@ export default function Home() {
       </View>
 
       {!needle && (
-        <Pressable onPress={() => router.navigate('/scan')} style={({ pressed }) => [s.scan, pressed && { opacity: 0.95 }]}>
+        <Pressable onPress={() => router.push('/scanner')} style={({ pressed }) => [s.scan, pressed && { opacity: 0.95 }]}>
           <View style={{ flex: 1 }}>
             <Text style={s.scanTitle}>Scan a document</Text>
             <Text style={s.scanSub}>Photograph pages, get one PDF. Nothing is uploaded.</Text>

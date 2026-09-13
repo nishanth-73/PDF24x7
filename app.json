@@ -36,15 +36,6 @@
           "cameraPermission": "PDF Tools uses the camera to scan documents into PDFs. Photos never leave your device."
         }
       ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "PDF Tools uses the camera to scan documents into PDFs. Photos never leave your device.",
-          "microphonePermission": false,
-          "recordAudioAndroid": false,
-          "barcodeScannerEnabled": true
-        }
-      ],
       "expo-router",
       "./plugins/withMaxRefreshRate",
       "./plugins/withArm64Only"

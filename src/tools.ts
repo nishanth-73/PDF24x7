@@ -87,7 +87,7 @@ export const TOOLS: Tool[] = [
     id: 'scan', section: 0, input: 'images', cta: 'Create PDF', doing: 'Building PDF',
     title: 'Scan Document',
     desc: 'Use your camera to scan any document and export it as a PDF. 100% on-device.',
-    run: async (imgs) => [{ name: '', bytes: await P.imagesToPdf(imgs as P.ScanPage[]) }], // ToolRunner passes mode/back along
+    run: () => Promise.reject(new Error('Open the scanner from the Scan tab.')), // the scanner builds its own PDF
   },
   {
     id: 'workflow', section: 3, input: 'pdfs', min: 1, cta: 'Run workflow', doing: 'Running your steps',

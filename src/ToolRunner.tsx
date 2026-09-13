@@ -3,35 +3,27 @@ import { memo, useCallback, useEffect, useState, type ComponentType } from 'reac
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import { pageInfo, watermarkLayout, zip, type PageInfo, type PageOrder } from './pdf';
 import { defaults, stepTools, toolById, type Opts, type Tool, type WorkflowStep } from './tools';
 import { openFile, readPicked, save, saveTemp, share, type Saved } from './storage';
-import { ArtTile, DocGlyph, ToolArt, kindOf } from './art';
+import { ArtTile, DocGlyph, kindOf } from './art';
 import { renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
-import { scanDocument } from '../modules/doc-scanner';
 import {
-  Button, DragHandle, Group, GroupLabel, Icon, IconBtn, LargeTitle, Options, Reorderable, Row, StepHead,
-  fmtSize, moveActions, pad, plural, swap,
+  Button, DragHandle, Group, GroupLabel, Icon, IconBtn, Options, Reorderable, Row, StepHead,
+  fmtSize, moveActions, plural, swap,
 } from './ui';
-import { AppFilesPickerModal } from './AppFilesPickerModal';
-import { ScanCamera, type ScanShot } from './ScanCamera';
+import { AppFilesPickerModal, type PickedFile } from './AppFilesPickerModal';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 
-type Picked = ScanShot; // a picked PDF, or a scanned photo with its scan mode
+type Picked = PickedFile;
 type Result = Saved & { bytes: Uint8Array };
 type EditorProps = { file?: Picked; value: Opts; onChange: (o: Opts) => void; onError: (msg: string) => void };
 
-const stamp = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}.${pad(d.getMinutes())}`;
-};
 const stripPdf = (name: string) => name.replace(/\.pdf$/i, '');
 const GAP = 10; // organize grid gap
 const AREA_H = 180; // organize page preview height
 const PREVIEW_H = 320; // watermark preview max height
 
-const SCAN_LABEL = { book: 'Book · 2 pages', id: 'ID card', card: 'Card' } as Record<string, string>;
 const EDITORS: Record<string, ComponentType<EditorProps>> = { organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor };
 
 export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () => void }) {
@@ -43,10 +35,8 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
   const [error, setError] = useState('');
   const [results, setResults] = useState<Result[]>([]);
   const [appFilesOpen, setAppFilesOpen] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(false);
   const Editor = EDITORS[tool.id];
   const multi = tool.input === 'pdfs';
-  const images = tool.input === 'images';
   const ready = files.length >= (multi ? tool.min ?? 2 : 1);
 
   const changeFiles = (next: Picked[]) => { setFiles(next); setResults([]); setError(''); };
@@ -60,34 +50,15 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
     changeFiles(multi ? [...files, ...picked] : picked.slice(0, 1));
   };
 
-  // Functional update: the camera adds pages while it stays open.
-  const addShots = (shots: Picked[]) => { setFiles((f) => [...f, ...shots]); setResults([]); setError(''); };
-  const importPhotos = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8, allowsMultipleSelection: true });
-    if (!r.canceled) addShots(r.assets.map((a) => ({ name: 'Page', uri: a.uri, size: a.fileSize })));
-  };
-
-  // System scanner with auto crop/rotate/cleanup; phones that can't run it get the manual camera instead.
-  const smartScan = async () => {
-    try {
-      const uris = await scanDocument();
-      if (uris.length) addShots(uris.map((uri) => ({ name: 'Page', uri })));
-    } catch {
-      setCameraOpen(true);
-    }
-  };
-
   const exec = async (mode: 'run' | 'preview') => {
     setBusy(mode);
     setError('');
     setResults([]);
     await new Promise((r) => setTimeout(r, 60)); // let the spinner paint before heavy JS work
     try {
-      const inputs = await Promise.all(files.map(async (f) => ({
-        name: f.name, bytes: await readPicked(f.uri), mode: f.mode, back: f.back ? await readPicked(f.back) : undefined,
-      })));
+      const inputs = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await readPicked(f.uri) })));
       const outs = await tool.run(inputs, opts);
-      const base = images ? `Scan ${stamp()}` : stripPdf(files[0].name);
+      const base = stripPdf(files[0].name);
       const nameOf = (o: { name: string; full?: boolean }) => (o.full ? o.name : o.name ? `${base}-${o.name}` : base);
       // ponytail: multi-file outputs (splits) preview only the first part; add a picker if people ask for the rest.
       if (mode === 'preview') openFile(saveTemp(`${nameOf(outs[0])} (preview).pdf`, outs[0].bytes));
@@ -102,7 +73,7 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
     const baseName = files[0]?.name ? stripPdf(files[0].name) : 'export';
     share(save(`${baseName}-all`, 'zip', zip(results)));
   };
-  const busyLabel = images ? `Building a ${files.length}-page PDF…` : `${tool.doing}…`;
+  const busyLabel = `${tool.doing}…`;
 
   const fileRow = (f: Picked, i: number, draggable: boolean) => (
     <Row
@@ -121,145 +92,101 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
 
   return (
     <>
-      {images ? (
-        <>
-          <LargeTitle title="Scan" sub={files.length ? `${plural(files.length, 'page')} captured` : 'Photos become pages, in the order you take them.'} />
-          {!files.length && (
-            <View style={s.tip}>
-              <ToolArt id="scan" size={52} />
-              <Text style={s.tipText}>Scan document finds the page edges, captures automatically, straightens, crops and cleans up each page.</Text>
-            </View>
-          )}
-          <Button
-            icon="line-scan" label={files.length ? 'Scan more pages' : 'Scan document'} variant={files.length ? 'secondary' : 'primary'}
-            onPress={smartScan}
-          />
-          <View style={[s.twoBtns, { marginTop: 10 }]}>
-            <Button icon="card-account-details-outline" label="ID, book & QR" variant="secondary" onPress={() => setCameraOpen(true)} style={{ flex: 1 }} />
-            <Button icon="image-multiple-outline" label="Import photos" variant="secondary" onPress={importPhotos} style={{ flex: 1 }} />
-          </View>
-          <ScanCamera
-            visible={cameraOpen} count={files.length} lastUri={files[files.length - 1]?.uri}
-            onAdd={addShots} onClose={() => setCameraOpen(false)}
-          />
-          {files.length > 1 && <Text style={[s.hint, { marginTop: 14 }]}>Hold a page and drag it to change the order.</Text>}
-          <View style={s.thumbs}>
+      {onBack && (
+        <Pressable onPress={onBack} style={s.back} hitSlop={12}>
+          <Icon name="chevron-left" size={24} color={c.ink} />
+          <Text style={s.backText}>Tools</Text>
+        </Pressable>
+      )}
+      <View style={s.head}>
+        <ArtTile id={tool.id} size={64} />
+        <Text style={s.title}>{tool.title}</Text>
+      </View>
+      <Text style={s.desc}>{tool.desc}</Text>
+
+      <StepHead n={1} title={multi ? 'Choose PDFs' : 'Choose a PDF'} />
+      {files.length > 0 && (
+        <Group>
+          {multi && files.length > 1 ? (
             <Reorderable
-              data={files} columns={3} gap={8} keyOf={(f) => f.uri} onReorder={changeFiles}
-              renderItem={(f, i) => (
-                <View style={s.thumb}>
-                  <Image source={{ uri: f.uri }} style={StyleSheet.absoluteFill} />
-                  <Text style={s.thumbNum} accessibilityLabel={`Page ${i + 1}`} {...moveActions(i, move)}>{i + 1}</Text>
-                  {f.mode && f.mode !== 'doc' && <Text style={s.thumbMode}>{SCAN_LABEL[f.mode]}</Text>}
-                  <Pressable style={s.thumbX} hitSlop={8} onPress={() => remove(f)} accessibilityLabel={`Remove page ${i + 1}`}>
-                    <Icon name="close" size={14} color={c.ink} />
-                  </Pressable>
-                </View>
-              )}
+              data={files} keyOf={(f) => f.uri} onReorder={changeFiles}
+              renderItem={(f, i) => <View style={s.rowBg}>{fileRow(f, i, true)}</View>}
             />
-          </View>
-        </>
-      ) : (
+          ) : (
+            files.map((f, i) => <View key={f.uri}>{fileRow(f, i, false)}</View>)
+          )}
+        </Group>
+      )}
+      {!files.length && (
+        <View style={s.pickerRow}>
+          <Pressable
+            onPress={pickPdf}
+            style={({ pressed }) => [s.pickerCard, pressed && { backgroundColor: c.sunken }]}
+          >
+            <View style={s.pickerIconBox}>
+              <Icon name="file-document-outline" size={26} color={c.ink} />
+            </View>
+            <Text style={s.pickerTitle}>Device Storage</Text>
+            <Text style={s.pickerSub}>Drive, Downloads, Phone</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setAppFilesOpen(true)}
+            style={({ pressed }) => [s.pickerCard, pressed && { backgroundColor: c.sunken }]}
+          >
+            <View style={[s.pickerIconBox, { backgroundColor: c.accentSoft }]}>
+              <Icon name="folder-outline" size={26} color={c.accent} />
+            </View>
+            <Text style={s.pickerTitle}>App Files</Text>
+            <Text style={s.pickerSub}>Saved in PDF Tools</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {multi && files.length > 1 && <Text style={[s.hint, { marginTop: 8 }]}>Use the arrows, or hold a file and drag it, to change the order.</Text>}
+      {multi && files.length > 0 && (
+        <View style={s.addMoreRow}>
+          <Pressable
+            onPress={pickPdf}
+            style={({ pressed }) => [s.addMoreBtn, pressed && { backgroundColor: c.sunken }]}
+          >
+            <Icon name="plus" size={18} color={c.ink} />
+            <Text style={s.addMoreText}>Add from Device</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setAppFilesOpen(true)}
+            style={({ pressed }) => [s.addMoreBtn, pressed && { backgroundColor: c.sunken }]}
+          >
+            <Icon name="folder-outline" size={18} color={c.accent} />
+            <Text style={s.addMoreText}>Add from App Files</Text>
+          </Pressable>
+        </View>
+      )}
+
+      <AppFilesPickerModal
+        visible={appFilesOpen}
+        multi={multi}
+        alreadySelectedUris={files.map((f) => f.uri)}
+        onClose={() => setAppFilesOpen(false)}
+        onSelect={(picked) => {
+          changeFiles(
+            multi
+              ? [...files, ...picked.filter((p) => !files.some((x) => x.uri === p.uri))]
+              : picked.slice(0, 1)
+          );
+        }}
+      />
+
+      {(Editor || !!tool.opts?.length) && (
         <>
-          {onBack && (
-            <Pressable onPress={onBack} style={s.back} hitSlop={12}>
-              <Icon name="chevron-left" size={24} color={c.ink} />
-              <Text style={s.backText}>Tools</Text>
-            </Pressable>
-          )}
-          <View style={s.head}>
-            <ArtTile id={tool.id} size={64} />
-            <Text style={s.title}>{tool.title}</Text>
-          </View>
-          <Text style={s.desc}>{tool.desc}</Text>
-
-          <StepHead n={1} title={multi ? 'Choose PDFs' : 'Choose a PDF'} />
-          {files.length > 0 && (
-            <Group>
-              {multi && files.length > 1 ? (
-                <Reorderable
-                  data={files} keyOf={(f) => f.uri} onReorder={changeFiles}
-                  renderItem={(f, i) => <View style={s.rowBg}>{fileRow(f, i, true)}</View>}
-                />
-              ) : (
-                files.map((f, i) => <View key={f.uri}>{fileRow(f, i, false)}</View>)
-              )}
-            </Group>
-          )}
-          {!files.length && (
-            <View style={s.pickerRow}>
-              <Pressable
-                onPress={pickPdf}
-                style={({ pressed }) => [s.pickerCard, pressed && { backgroundColor: c.sunken }]}
-              >
-                <View style={s.pickerIconBox}>
-                  <Icon name="file-document-outline" size={26} color={c.ink} />
-                </View>
-                <Text style={s.pickerTitle}>Device Storage</Text>
-                <Text style={s.pickerSub}>Drive, Downloads, Phone</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setAppFilesOpen(true)}
-                style={({ pressed }) => [s.pickerCard, pressed && { backgroundColor: c.sunken }]}
-              >
-                <View style={[s.pickerIconBox, { backgroundColor: c.accentSoft }]}>
-                  <Icon name="folder-outline" size={26} color={c.accent} />
-                </View>
-                <Text style={s.pickerTitle}>App Files</Text>
-                <Text style={s.pickerSub}>Saved in PDF Tools</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {multi && files.length > 1 && <Text style={[s.hint, { marginTop: 8 }]}>Use the arrows, or hold a file and drag it, to change the order.</Text>}
-          {multi && files.length > 0 && (
-            <View style={s.addMoreRow}>
-              <Pressable
-                onPress={pickPdf}
-                style={({ pressed }) => [s.addMoreBtn, pressed && { backgroundColor: c.sunken }]}
-              >
-                <Icon name="plus" size={18} color={c.ink} />
-                <Text style={s.addMoreText}>Add from Device</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setAppFilesOpen(true)}
-                style={({ pressed }) => [s.addMoreBtn, pressed && { backgroundColor: c.sunken }]}
-              >
-                <Icon name="folder-outline" size={18} color={c.accent} />
-                <Text style={s.addMoreText}>Add from App Files</Text>
-              </Pressable>
-            </View>
-          )}
-
-          <AppFilesPickerModal
-            visible={appFilesOpen}
-            multi={multi}
-            alreadySelectedUris={files.map((f) => f.uri)}
-            onClose={() => setAppFilesOpen(false)}
-            onSelect={(picked) => {
-              changeFiles(
-                multi
-                  ? [...files, ...picked.filter((p) => !files.some((x) => x.uri === p.uri))]
-                  : picked.slice(0, 1)
-              );
-            }}
-          />
-
-          {(Editor || !!tool.opts?.length) && (
-            <>
-              <StepHead n={2} title={tool.id === 'organize' ? 'Arrange pages' : tool.id === 'workflow' ? 'Add steps' : 'Options'} />
-              {Editor
-                ? <Editor file={files[0]} value={opts} onChange={setOpts} onError={setError} />
-                : <Options defs={tool.opts ?? []} value={opts} onChange={setOpts} />}
-            </>
-          )}
+          <StepHead n={2} title={tool.id === 'organize' ? 'Arrange pages' : tool.id === 'workflow' ? 'Add steps' : 'Options'} />
+          {Editor
+            ? <Editor file={files[0]} value={opts} onChange={setOpts} onError={setError} />
+            : <Options defs={tool.opts ?? []} value={opts} onChange={setOpts} />}
         </>
       )}
 
-      {(!images || files.length > 0) && (
-        <Button label={busy === 'run' ? busyLabel : tool.cta} busy={busy === 'run'} disabled={!ready || busy === 'preview'} onPress={() => exec('run')} style={s.cta} />
-      )}
-      {!images && !tool.noPreview && (
+      <Button label={busy === 'run' ? busyLabel : tool.cta} busy={busy === 'run'} disabled={!ready || busy === 'preview'} onPress={() => exec('run')} style={s.cta} />
+      {!tool.noPreview && (
         <Button
           icon="eye-outline" label={busy === 'preview' ? 'Preparing preview…' : 'Preview result'} variant="secondary"
           busy={busy === 'preview'} disabled={!ready || busy === 'run'} onPress={() => exec('preview')} style={{ marginTop: 10 }}
@@ -289,7 +216,7 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
             ))}
           </Group>
           {results.length > 1 && <Button icon="folder-zip-outline" label="Share all as one ZIP" variant="secondary" onPress={shareAll} style={{ marginTop: 10 }} />}
-          <Text style={s.again} onPress={() => changeFiles([])}>{images ? 'Start a new scan' : 'Use another file'}</Text>
+          <Text style={s.again} onPress={() => changeFiles([])}>Use another file</Text>
         </>
       )}
     </>
@@ -512,20 +439,9 @@ const useStyles = makeStyles((c) => ({
   head: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   title: { ...typo.title, fontSize: 23, lineHeight: 30, color: c.accent, flex: 1 },
   desc: { ...typo.body, color: c.sub, marginTop: 14 },
-  tip: {
-    flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, marginBottom: 16,
-    borderRadius: radius.group, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
-  },
-  tipText: { ...typo.small, color: c.sub, flex: 1 },
   rowBg: { backgroundColor: c.surface },
   fileLead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fileNum: { minWidth: 18, textAlign: 'center', fontFamily: fonts.bold, fontSize: 13, color: c.sub },
-  drop: {
-    alignItems: 'center', paddingVertical: 22, paddingHorizontal: 16, borderRadius: radius.group,
-    borderWidth: 1.5, borderStyle: 'dashed', borderColor: c.lineStrong, backgroundColor: c.surface,
-  },
-  dropTitle: { fontFamily: fonts.bold, fontSize: 15, color: c.ink, marginTop: 6 },
-  dropSub: { ...typo.small, color: c.sub, marginTop: 2 },
   pickerRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   pickerCard: {
     flex: 1,
@@ -563,18 +479,6 @@ const useStyles = makeStyles((c) => ({
     backgroundColor: c.surface,
   },
   addMoreText: { fontFamily: fonts.med, fontSize: 13.5, color: c.ink },
-  twoBtns: { flexDirection: 'row', gap: 10 },
-  thumbs: { marginTop: 14 },
-  thumb: { width: '100%', aspectRatio: 0.75, borderRadius: 8, overflow: 'hidden', backgroundColor: c.sunken },
-  thumbNum: {
-    position: 'absolute', left: 6, bottom: 6, minWidth: 20, textAlign: 'center', fontFamily: fonts.bold, fontSize: 11,
-    color: c.onInk, backgroundColor: c.ink, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, overflow: 'hidden',
-  },
-  thumbMode: {
-    position: 'absolute', left: 6, top: 6, fontFamily: fonts.bold, fontSize: 10, color: c.onInk, backgroundColor: c.accent,
-    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, overflow: 'hidden',
-  },
-  thumbX: { position: 'absolute', right: 5, top: 5, backgroundColor: c.surface, borderRadius: 12, padding: 3 },
   cta: { marginTop: 28 },
   error: { flexDirection: 'row', gap: 8, marginTop: 14, padding: 12, borderRadius: radius.control, backgroundColor: c.accentSoft },
   errorText: { flex: 1, ...typo.small, fontSize: 14, color: c.accentInk },

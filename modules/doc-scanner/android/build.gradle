@@ -15,5 +15,11 @@ android {
 }
 
 dependencies {
-  implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0'
+  def camerax = "1.6.0"
+  implementation "androidx.camera:camera-core:$camerax"
+  implementation "androidx.camera:camera-camera2:$camerax"
+  implementation "androidx.camera:camera-lifecycle:$camerax"
+  implementation "androidx.camera:camera-view:$camerax"
+  implementation "org.opencv:opencv:4.12.0" // edge detection, perspective warp, filters
+  implementation "com.google.zxing:core:3.5.3" // QR codes seen while scanning (~0.5 MB, no ML model)
 }

@@ -11,6 +11,7 @@ import {
   fmtDate, fmtSize, plural,
 } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
+import { listDocs } from '../../src/scan/model';
 
 type Filter = 'all' | 'pdf' | 'zip' | 'recent';
 const FILTERS: { key: Filter; label: string }[] = [
@@ -69,6 +70,7 @@ export default function FilesTab() {
   const [movingFile, setMovingFile] = useState<Saved | null>(null);
 
   const [allFiles, setAllFiles] = useState<Saved[]>([]);
+  const [scans, setScans] = useState<Map<string, string>>(new Map()); // PDF name -> scan id, for "Edit scan"
 
   const refresh = useCallback(() => {
     const loadedFolders = listFolders().map((f) => ({
@@ -79,6 +81,7 @@ export default function FilesTab() {
     setFolders(currentFolder ? [] : loadedFolders);
     setFiles(listFiles(currentFolder?.uri));
     setAllFiles(listAllFiles());
+    setScans(new Map(listDocs().flatMap((d) => (d.pdf ? [[d.pdf.name, d.id] as [string, string]] : []))));
   }, [currentFolder]);
   useFocusEffect(refresh);
 
@@ -268,6 +271,9 @@ export default function FilesTab() {
                     key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
                     subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
                   >
+                    {scans.has(f.name) && (
+                      <IconBtn name="file-document-edit-outline" color={c.accent} onPress={() => router.push({ pathname: '/scanner', params: { id: scans.get(f.name)! } })} />
+                    )}
                     <IconBtn name="folder-move-outline" size={18} color={c.sub} onPress={() => setMovingFile(f)} />
                     <IconBtn name="share-variant-outline" onPress={() => share(f)} />
                     <IconBtn name="delete-outline" onPress={() => openDeleteFileModal(f)} />

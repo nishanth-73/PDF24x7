@@ -1,50 +1,58 @@
 package expo.modules.docscanner
 
-import android.app.Activity
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import expo.modules.kotlin.Promise
+import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
 
-// Launches Google's ML Kit document scanner. It runs inside Play services, so the APK carries no model or camera code.
+class StrokeRecord : Record {
+  @Field val shape: String = "path" // path | rect | fill | ellipse
+  @Field val points: List<Double> = emptyList() // x,y pairs as fractions of the finished image
+  @Field val width: Double = 0.01 // fraction of image width
+  @Field val color: String = "#000000"
+}
+
+class ProcessOptions : Record {
+  @Field val corners: DoubleArray? = null
+  @Field val rotation: Int = 0
+  @Field val filter: String = "original" // original | auto | light | gray | whiteboard
+  @Field val brightness: Double = 0.0 // -1..1
+  @Field val contrast: Double = 0.0 // -1..1
+  @Field val strokes: List<StrokeRecord> = emptyList()
+  @Field val maxSize: Int = 2400
+  @Field val dest: String? = null // file uri to write; a new cache file when omitted
+}
+
 class DocScannerModule : Module() {
-  private var pending: Promise? = null
+  private val context get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
 
   override fun definition() = ModuleDefinition {
     Name("DocScanner")
 
-    AsyncFunction("scan") { pageLimit: Int, promise: Promise ->
-      if (pending != null) {
-        promise.reject("ERR_SCAN_BUSY", "The scanner is already open.", null)
-        return@AsyncFunction
-      }
-      val activity = appContext.throwingActivity
-      val options = GmsDocumentScannerOptions.Builder()
-        .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL) // crop, rotate, filters, stain & finger cleanup
-        .setGalleryImportAllowed(true)
-        .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
-        .apply { if (pageLimit > 0) setPageLimit(pageLimit) }
-        .build()
-      GmsDocumentScanning.getClient(options).getStartScanIntent(activity)
-        .addOnSuccessListener { sender ->
-          pending = promise
-          activity.startIntentSenderForResult(sender, REQUEST_CODE, null, 0, 0, 0)
-        }
-        .addOnFailureListener { e -> promise.reject("ERR_SCAN_UNAVAILABLE", e.message ?: "Document scanner unavailable.", e) }
+    OnCreate {
+      appContext.reactContext?.let { ctx -> DocModel.source = { ctx.assets.open(DocModel.ASSET).use { it.readBytes() } } }
     }
 
-    OnActivityResult { _, (requestCode, resultCode, data) ->
-      if (requestCode != REQUEST_CODE) return@OnActivityResult
-      val promise = pending ?: return@OnActivityResult
-      pending = null
-      val result = if (resultCode == Activity.RESULT_OK) GmsDocumentScanningResult.fromActivityResultIntent(data) else null
-      promise.resolve(result?.pages?.map { it.imageUri.toString() } ?: emptyList<String>())
+    // Finds the page in an existing photo (gallery import). Loads upright, like process().
+    AsyncFunction("detect") { uri: String ->
+      val bmp = DocVision.load(context, uri, 1600)
+      val corners = DocVision.detectBitmap(bmp)
+      mapOf("uri" to uri, "width" to bmp.width, "height" to bmp.height, "corners" to corners?.toList()).also { bmp.recycle() }
     }
-  }
 
-  private companion object {
-    const val REQUEST_CODE = 4217
+    AsyncFunction("process") { uri: String, options: ProcessOptions ->
+      DocVision.process(context, uri, options)
+    }
+
+    View(DocCameraView::class) {
+      Events("onDetect", "onQr")
+      Prop("flash") { view: DocCameraView, value: String -> view.flash = value }
+      Prop("detect") { view: DocCameraView, value: Boolean -> view.detecting = value }
+      Prop("qr") { view: DocCameraView, value: Boolean -> view.qr = value }
+      AsyncFunction("capture") { view: DocCameraView, promise: Promise -> view.takePicture(promise) }
+      OnViewDestroys { view: DocCameraView -> view.destroy() }
+    }
   }
 }

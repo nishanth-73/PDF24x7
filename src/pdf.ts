@@ -408,15 +408,49 @@ export async function organize(bytes: Uint8Array, order: PageOrder[]) {
   return out.save();
 }
 
-// Scans: each photo becomes one page, A4 wide, keeping the photo's aspect.
-// Camera scan modes. Card modes crop to CARD_FRAME, which the camera draws over its 3:4 preview.
-export type ScanMode = 'doc' | 'book' | 'id' | 'card';
-export type ScanPage = { bytes: Uint8Array; mode?: ScanMode; back?: Uint8Array };
-type Crop = { x: number; y: number; w: number; h: number }; // fractions of the photo, y from the top
-const CARD_RATIO = 85.6 / 54; // ISO ID-1: ID, bank and most business cards
-// ponytail: assumes the photo is 3:4 like the preview; derive from the real photo aspect if a device returns other sizes.
-export const CARD_FRAME: Crop = { x: 0.07, w: 0.86, h: (0.86 / CARD_RATIO) * 0.75, y: (1 - (0.86 / CARD_RATIO) * 0.75) / 2 };
+// ── Scanned pages ──────────────────────────────────────────────────────────
+// Page kinds follow Adobe Scan's capture modes; sizes follow its Resize menu. The review screen draws
+// pages from the same layout, so what you see is what the PDF gets.
+export type PageKind = 'doc' | 'book' | 'id' | 'card' | 'whiteboard';
+export type PageSize = 'fit' | `${PaperSize}-${'portrait' | 'landscape'}`;
+export type Crop = { x: number; y: number; w: number; h: number }; // fractions of the image, y from the top
+export type Placed = { img: number; crop: Crop; x: number; y: number; w: number; h: number }; // points, y from the bottom
+export type Sheet = { W: number; H: number; items: Placed[] };
+export type ScanPdfPage = { kind: PageKind; size: PageSize; images: Uint8Array[] };
+type Dim = { width: number; height: number };
+
 const FULL: Crop = { x: 0, y: 0, w: 1, h: 1 };
+const CARD_W = 85.6 * 2.8346; // ISO ID-1 card width in points, so ID copies print at real size
+const MARGIN = 24;
+
+export function layoutScanPage(kind: PageKind, size: PageSize, imgs: Dim[]): Sheet[] {
+  const [first] = imgs;
+  let paper: [number, number] | null = null;
+  if (size !== 'fit') {
+    const [name, orient] = size.split('-');
+    const [a, b] = SIZES[name as PaperSize] ?? A4;
+    paper = orient === 'landscape' ? [b, a] : [a, b];
+  }
+  // One image region per sheet: full-bleed at A4 width when 'fit', else centered inside the margins.
+  const single = (crop: Crop, aw: number, ah: number, fitW = A4[0]): Sheet => {
+    if (!paper) return { W: fitW, H: (fitW * ah) / aw, items: [{ img: 0, crop, x: 0, y: 0, w: fitW, h: (fitW * ah) / aw }] };
+    const [W, H] = paper;
+    const k = Math.min((W - 2 * MARGIN) / aw, (H - 2 * MARGIN) / ah);
+    return { W, H, items: [{ img: 0, crop, x: (W - aw * k) / 2, y: (H - ah * k) / 2, w: aw * k, h: ah * k }] };
+  };
+  if (kind === 'book') return [0, 0.5].map((x) => single({ x, y: 0, w: 0.5, h: 1 }, first.width / 2, first.height));
+  if (kind === 'card') return [single(FULL, first.width, first.height, 252)];
+  if (kind === 'id') { // front above back
+    const [W, H] = paper ?? A4;
+    const cw = Math.min(CARD_W, W - 2 * MARGIN);
+    const items = imgs.map((im, i): Placed => {
+      const h = (cw * im.height) / im.width;
+      return { img: i, crop: FULL, x: (W - cw) / 2, y: i === 0 ? H / 2 + 12 : H / 2 - 12 - h, w: cw, h };
+    });
+    return [{ W, H, items }];
+  }
+  return [single(FULL, first.width, first.height)];
+}
 
 // Draws only the `crop` part of an image into the box (x, y, w, h), clipping the rest.
 function drawCropped(page: PDFPage, img: PDFImage, crop: Crop, x: number, y: number, w: number, h: number) {
@@ -427,29 +461,14 @@ function drawCropped(page: PDFPage, img: PDFImage, crop: Crop, x: number, y: num
   page.pushOperators(popGraphicsState());
 }
 
-export async function imagesToPdf(pages: ScanPage[]) {
+export async function imagesToPdf(pages: ScanPdfPage[]) {
   if (!pages.length) throw new Error('At least one image is required to create a PDF.');
   const doc = await PDFDocument.create();
-  const embed = (b: Uint8Array) => (b[0] === 0x89 ? doc.embedPng(b) : doc.embedJpg(b));
-  const [W, H] = A4;
-  for (const { bytes, mode = 'doc', back } of pages) {
-    const img = await embed(bytes);
-    if (mode === 'book') { // one photo of an open book -> left page, right page
-      const h = (W * img.height) / (img.width / 2);
-      drawCropped(doc.addPage([W, h]), img, { x: 0, y: 0, w: 0.5, h: 1 }, 0, 0, W, h);
-      drawCropped(doc.addPage([W, h]), img, { x: 0.5, y: 0, w: 0.5, h: 1 }, 0, 0, W, h);
-    } else if (mode === 'card') { // card-sized page
-      const cw = 252;
-      drawCropped(doc.addPage([cw, cw / CARD_RATIO]), img, CARD_FRAME, 0, 0, cw, cw / CARD_RATIO);
-    } else if (mode === 'id') { // front above back at real size on A4, ready to print
-      const cw = 85.6 * 2.8346;
-      const ch = cw / CARD_RATIO;
-      const page = doc.addPage([W, H]);
-      drawCropped(page, img, CARD_FRAME, (W - cw) / 2, H / 2 + 24, cw, ch);
-      if (back) drawCropped(page, await embed(back), CARD_FRAME, (W - cw) / 2, H / 2 - 24 - ch, cw, ch);
-    } else {
-      const h = (W * img.height) / img.width;
-      drawCropped(doc.addPage([W, h]), img, FULL, 0, 0, W, h);
+  for (const { kind, size, images } of pages) {
+    const embedded = await Promise.all(images.map((b) => (b[0] === 0x89 ? doc.embedPng(b) : doc.embedJpg(b))));
+    for (const sheet of layoutScanPage(kind, size, embedded)) {
+      const page = doc.addPage([sheet.W, sheet.H]);
+      for (const it of sheet.items) drawCropped(page, embedded[it.img], it.crop, it.x, it.y, it.w, it.h);
     }
   }
   return doc.save();

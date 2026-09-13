@@ -40,6 +40,19 @@ const dark: Palette = {
   onInk: '#141311',
 };
 export const palettes = { light, dark };
+
+// The scanner is its own dark, camera-style surface in both themes, with Adobe Scan's blue for detection and actions.
+export const scanUi = {
+  bg: '#000000',
+  panel: '#161616',
+  raised: '#262626',
+  text: '#FFFFFF',
+  dim: '#A3A3A3',
+  line: '#333333',
+  blue: '#1473E6',
+  blueSoft: 'rgba(20,115,230,0.22)',
+  scrim: 'rgba(0,0,0,0.6)',
+};
 export type Scheme = keyof typeof palettes;
 export type ThemePref = 'system' | Scheme;
 
