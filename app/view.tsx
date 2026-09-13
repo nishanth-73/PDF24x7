@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, BackHandler, FlatList, Image, Modal, PixelRatio, Platform, Pressable, ScrollView, Share,
+  ActivityIndicator, Animated, BackHandler, FlatList, Image, Modal, PanResponder, PixelRatio, Platform, Pressable, ScrollView, Share,
   StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -180,6 +180,76 @@ const GridTile = memo(function GridTile({ item, index, onSelect }: GridTileProps
   );
 });
 
+const GRIP_H = 52;
+
+// Android-style fast scroll: a grip on the right edge that shows while scrolling; dragging it seeks through the document.
+// ponytail: the page label assumes pages of similar height; map offsets through measured item layouts if mixed sizes matter.
+function FastScroll({ y, contentH, viewH, count, seek }: {
+  y: Animated.Value; contentH: number; viewH: number; count: number; seek: (offset: number) => void;
+}) {
+  const s = useStyles();
+  const { c } = useTheme();
+  const maxScroll = Math.max(1, contentH - viewH);
+  const track = Math.max(1, viewH - GRIP_H);
+  const m = useRef({ maxScroll, track, count, seek, last: 0, start: 0, dragging: false });
+  Object.assign(m.current, { maxScroll, track, count, seek });
+  const opacity = useRef(new Animated.Value(0)).current;
+  const [visible, setVisible] = useState(false);
+  const [page, setPage] = useState(-1); // page label, only while dragging
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const fade = (on: boolean) => {
+    setVisible(on);
+    Animated.timing(opacity, { toValue: on ? 1 : 0, duration: on ? 120 : 250, useNativeDriver: false }).start();
+  };
+  const hideLater = () => {
+    clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => !m.current.dragging && fade(false), 1500);
+  };
+
+  useEffect(() => {
+    let shown = false;
+    const id = y.addListener(({ value }) => {
+      m.current.last = value;
+      if (!shown) { shown = true; fade(true); }
+      hideLater();
+    });
+    const off = opacity.addListener(({ value }) => { if (value === 0) shown = false; });
+    return () => { y.removeListener(id); opacity.removeListener(off); clearTimeout(hideTimer.current); };
+  }, [y]);
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => { m.current.dragging = true; m.current.start = m.current.last; fade(true); },
+    onPanResponderMove: (_, g) => {
+      const r = m.current;
+      const offset = Math.min(r.maxScroll, Math.max(0, r.start + g.dy * (r.maxScroll / r.track)));
+      r.seek(offset);
+      setPage(Math.min(r.count - 1, Math.floor((offset / r.maxScroll) * r.count)));
+    },
+    onPanResponderRelease: () => { m.current.dragging = false; setPage(-1); hideLater(); },
+    onPanResponderTerminate: () => { m.current.dragging = false; setPage(-1); hideLater(); },
+  })).current;
+
+  const top = y.interpolate({ inputRange: [0, maxScroll], outputRange: [0, track], extrapolate: 'clamp' });
+  return (
+    <Animated.View
+      pointerEvents={visible ? 'box-none' : 'none'}
+      style={[s.fastWrap, { opacity, transform: [{ translateY: top }] }]}
+    >
+      {page >= 0 && (
+        <View style={s.fastBubble}>
+          <Text style={s.fastBubbleText}>{page + 1} / {count}</Text>
+        </View>
+      )}
+      <View style={s.fastGrip} {...pan.panHandlers} accessibilityLabel="Fast scroll">
+        <Icon name="drag-vertical" size={20} color={c.sub} />
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function Viewer() {
   const s = useStyles();
   const { c, scheme } = useTheme();
@@ -190,6 +260,15 @@ export default function Viewer() {
 
   const flatListRef = useRef<FlatList>(null);
   const textListRef = useRef<FlatList>(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [contentH, setContentH] = useState(0);
+  const [viewH, setViewH] = useState(0);
+  const listScroll = {
+    onScroll: (e: { nativeEvent: { contentOffset: { y: number } } }) => scrollY.setValue(e.nativeEvent.contentOffset.y),
+    scrollEventThrottle: 16,
+    onContentSizeChange: (_: number, h: number) => setContentH(h),
+    onLayout: (e: { nativeEvent: { layout: { height: number } } }) => setViewH(e.nativeEvent.layout.height),
+  };
 
   // Core state
   const [pages, setPages] = useState<Thumb[] | null>(null);
@@ -457,12 +536,15 @@ export default function Viewer() {
 
       {/* ── Main Content Area ── */}
       {pages ? (
-        mode === 'pages' ? (
+        <View style={{ flex: 1 }}>
+        {mode === 'pages' ? (
           /* ── Visual Pages View ── */
           <FlatList
             ref={flatListRef}
             data={pages}
             keyExtractor={(p) => p.uri}
+            {...listScroll}
+            showsVerticalScrollIndicator={false}
             contentContainerStyle={s.list}
             initialNumToRender={2}
             maxToRenderPerBatch={3}
@@ -494,6 +576,8 @@ export default function Viewer() {
             ref={textListRef}
             data={pages}
             keyExtractor={(_, i) => `text-page-${i}`}
+            {...listScroll}
+            showsVerticalScrollIndicator={false}
             contentContainerStyle={s.list}
             initialNumToRender={4}
             maxToRenderPerBatch={4}
@@ -531,7 +615,14 @@ export default function Viewer() {
               />
             )}
           />
-        )
+        )}
+        {pages.length > 2 && contentH > viewH * 2 && (
+          <FastScroll
+            key={mode} y={scrollY} contentH={contentH} viewH={viewH} count={pages.length}
+            seek={(offset) => (mode === 'pages' ? flatListRef : textListRef).current?.scrollToOffset({ offset, animated: false })}
+          />
+        )}
+        </View>
       ) : error ? (
         <View style={s.center}>
           <Text style={s.msg}>{error}</Text>
@@ -709,6 +800,17 @@ const useStyles = makeStyles((c) => ({
   quickJumps: { flexDirection: 'row', gap: 8, marginBottom: 6 },
   quickJumpBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: c.sunken, borderRadius: radius.tile },
   quickJumpText: { fontFamily: fonts.med, fontSize: 12, color: c.ink },
+  fastWrap: { position: 'absolute', top: 0, right: 0, height: GRIP_H, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  fastGrip: {
+    width: 34, height: GRIP_H, alignItems: 'center', justifyContent: 'center', borderTopLeftRadius: GRIP_H / 2,
+    borderBottomLeftRadius: GRIP_H / 2, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderRightWidth: 0,
+    borderColor: c.lineStrong, elevation: 4, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+  },
+  fastBubble: {
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: c.surface, elevation: 4,
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+  },
+  fastBubbleText: { fontFamily: fonts.bold, fontSize: 20, color: c.ink },
   gridContainer: { padding: 8 },
   gridTile: { flex: 1 / 3, margin: 4, alignItems: 'center', backgroundColor: c.surface, borderRadius: 6, padding: 6 },
   gridThumb: { width: '100%', height: 110, borderRadius: 3 },

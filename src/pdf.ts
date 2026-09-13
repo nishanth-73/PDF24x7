@@ -1,9 +1,9 @@
 // Every operation runs on-device with pure-JS libs: bytes in, bytes out.
 import {
   PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFStream, PDFString,
-  StandardFontEmbedder, StandardFonts, decodePDFRawStream, degrees, rgb,
+  StandardFontEmbedder, StandardFonts, clip, decodePDFRawStream, degrees, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb,
 } from 'pdf-lib';
-import type { PDFObject, PDFPage } from 'pdf-lib';
+import type { PDFImage, PDFObject, PDFPage } from 'pdf-lib';
 import { zipSync } from 'fflate';
 import jpeg from 'jpeg-js';
 
@@ -409,14 +409,48 @@ export async function organize(bytes: Uint8Array, order: PageOrder[]) {
 }
 
 // Scans: each photo becomes one page, A4 wide, keeping the photo's aspect.
-export async function imagesToPdf(images: Uint8Array[]) {
-  if (!images.length) throw new Error('At least one image is required to create a PDF.');
+// Camera scan modes. Card modes crop to CARD_FRAME, which the camera draws over its 3:4 preview.
+export type ScanMode = 'doc' | 'book' | 'id' | 'card';
+export type ScanPage = { bytes: Uint8Array; mode?: ScanMode; back?: Uint8Array };
+type Crop = { x: number; y: number; w: number; h: number }; // fractions of the photo, y from the top
+const CARD_RATIO = 85.6 / 54; // ISO ID-1: ID, bank and most business cards
+// ponytail: assumes the photo is 3:4 like the preview; derive from the real photo aspect if a device returns other sizes.
+export const CARD_FRAME: Crop = { x: 0.07, w: 0.86, h: (0.86 / CARD_RATIO) * 0.75, y: (1 - (0.86 / CARD_RATIO) * 0.75) / 2 };
+const FULL: Crop = { x: 0, y: 0, w: 1, h: 1 };
+
+// Draws only the `crop` part of an image into the box (x, y, w, h), clipping the rest.
+function drawCropped(page: PDFPage, img: PDFImage, crop: Crop, x: number, y: number, w: number, h: number) {
+  const sw = w / crop.w;
+  const sh = h / crop.h;
+  page.pushOperators(pushGraphicsState(), rectangle(x, y, w, h), clip(), endPath());
+  page.drawImage(img, { x: x - crop.x * sw, y: y - (1 - crop.y - crop.h) * sh, width: sw, height: sh });
+  page.pushOperators(popGraphicsState());
+}
+
+export async function imagesToPdf(pages: ScanPage[]) {
+  if (!pages.length) throw new Error('At least one image is required to create a PDF.');
   const doc = await PDFDocument.create();
-  for (const bytes of images) {
-    const img = bytes[0] === 0x89 ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
-    const W = A4[0];
-    const H = img.width > 0 ? (W * img.height) / img.width : A4[1];
-    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+  const embed = (b: Uint8Array) => (b[0] === 0x89 ? doc.embedPng(b) : doc.embedJpg(b));
+  const [W, H] = A4;
+  for (const { bytes, mode = 'doc', back } of pages) {
+    const img = await embed(bytes);
+    if (mode === 'book') { // one photo of an open book -> left page, right page
+      const h = (W * img.height) / (img.width / 2);
+      drawCropped(doc.addPage([W, h]), img, { x: 0, y: 0, w: 0.5, h: 1 }, 0, 0, W, h);
+      drawCropped(doc.addPage([W, h]), img, { x: 0.5, y: 0, w: 0.5, h: 1 }, 0, 0, W, h);
+    } else if (mode === 'card') { // card-sized page
+      const cw = 252;
+      drawCropped(doc.addPage([cw, cw / CARD_RATIO]), img, CARD_FRAME, 0, 0, cw, cw / CARD_RATIO);
+    } else if (mode === 'id') { // front above back at real size on A4, ready to print
+      const cw = 85.6 * 2.8346;
+      const ch = cw / CARD_RATIO;
+      const page = doc.addPage([W, H]);
+      drawCropped(page, img, CARD_FRAME, (W - cw) / 2, H / 2 + 24, cw, ch);
+      if (back) drawCropped(page, await embed(back), CARD_FRAME, (W - cw) / 2, H / 2 - 24 - ch, cw, ch);
+    } else {
+      const h = (W * img.height) / img.width;
+      drawCropped(doc.addPage([W, h]), img, FULL, 0, 0, W, h);
+    }
   }
   return doc.save();
 }

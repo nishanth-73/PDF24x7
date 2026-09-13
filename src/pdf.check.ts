@@ -57,7 +57,8 @@ assert.equal(await count(await P.pageNumbers(src, { position: 'right', format: '
 const org = await PDFDocument.load(await P.organize(src, [{ i: 5, rot: 90 }, { i: 0, rot: 0 }]));
 assert.equal(org.getPageCount(), 2);
 assert.equal(org.getPage(0).getRotation().angle, 90);
-assert.equal(await count(await P.imagesToPdf([photo, photo])), 2);
+assert.equal(await count(await P.imagesToPdf([{ bytes: photo }, { bytes: photo }])), 2);
+assert.equal(await count(await P.imagesToPdf([{ bytes: photo, mode: 'book' }, { bytes: photo, mode: 'id', back: photo }, { bytes: photo, mode: 'card' }])), 4);
 await assert.rejects(P.imagesToPdf([]));
 const extracted = await P.extractAllText(src);
 assert.equal(extracted.length, 6);
