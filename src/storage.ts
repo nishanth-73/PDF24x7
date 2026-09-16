@@ -2,6 +2,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { router } from 'expo-router';
+import { syncSoon } from './backup';
 
 export type Saved = { name: string; uri: string; size: number; modified: number };
 export type Folder = { name: string; uri: string; created: number };
@@ -15,6 +16,7 @@ function rootFolder() {
 // ── Folder management (one level deep) ──────────────────────────────────
 
 export function createFolder(name: string): Folder {
+  syncSoon(); // mirrored to Google Drive when sync is on
   const clean = name.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'New Folder';
   const root = rootFolder();
   let d = new Directory(root, clean);
@@ -35,6 +37,7 @@ export function listFolders(): Folder[] {
 }
 
 export function renameFolder(uri: string, newName: string): void {
+  syncSoon(); // mirrored to Google Drive when sync is on
   const clean = newName.replace(/[\\/:*?"<>|]+/g, '_').trim();
   if (!clean) return;
   try {
@@ -53,6 +56,7 @@ export function renameFolder(uri: string, newName: string): void {
 }
 
 export function removeFolder(uri: string): void {
+  syncSoon(); // mirrored to Google Drive when sync is on
   try {
     const rootUri = rootFolder().uri;
     // Safety guard: ONLY delete folders inside the app's 'PDF Tools' directory.
@@ -68,6 +72,7 @@ export function removeFolder(uri: string): void {
 }
 
 export function moveFile(fileUri: string, folderUri: string): void {
+  syncSoon(); // mirrored to Google Drive when sync is on
   try {
     const f = new File(fileUri);
     if (f.exists) {
@@ -92,6 +97,7 @@ export function moveFile(fileUri: string, folderUri: string): void {
 }
 
 export function moveFileToRoot(fileUri: string): void {
+  syncSoon(); // mirrored to Google Drive when sync is on
   try {
     const f = new File(fileUri);
     if (f.exists) {
@@ -125,6 +131,7 @@ export function save(base: string, ext: string, bytes: Uint8Array, folderUri?: s
   for (let i = 2; f.exists; i++) f = new File(d, `${clean} (${i}).${ext}`);
   f.create({ overwrite: true });
   f.write(bytes);
+  syncSoon(); // no-op unless Google Drive sync is on
   return { name: f.name, uri: f.uri, size: bytes.length, modified: Date.now(), bytes };
 }
 
@@ -167,6 +174,7 @@ export async function readPicked(uri: string): Promise<Uint8Array> {
 }
 
 export function removeFile(uri: string): void {
+  syncSoon(); // mirrored to Google Drive when sync is on
   try {
     const rootUri = rootFolder().uri;
     // Safety guard: ONLY delete files located inside the app's 'PDF Tools' directory.
@@ -183,6 +191,7 @@ export function removeFile(uri: string): void {
 }
 
 export function clearFiles(): void {
+  syncSoon(); // mirrored to Google Drive when sync is on
   try {
     const root = rootFolder();
     if (root.exists) root.delete();

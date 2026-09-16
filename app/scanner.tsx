@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Capture } from '../src/scan/Capture';
 import { Review } from '../src/scan/Review';
+import { RecentScans } from '../src/scan/Recent';
 import {
   cleanFiles, deleteFile, discardChanges, exportPdf, isDirty, latestDraft, loadDoc, newDoc, renderShot, saveDoc, type Page, type ScanDoc,
 } from '../src/scan/model';
@@ -22,6 +23,7 @@ export default function Scanner() {
   const [draft, setDraft] = useState<ScanDoc | null>(() => (id ? null : latestDraft()));
   const [asking, setAsking] = useState(false); // the leave dialog
   const [saving, setSaving] = useState(false);
+  const [recentOpen, setRecentOpen] = useState(false);
   const rendering = useRef(new Set<string>());
 
   useEffect(() => {
@@ -106,7 +108,8 @@ export default function Scanner() {
       <StatusBar style="light" />
       {view === 'capture' || !doc.pages.length ? ( // review needs pages; with none, the camera is the only useful screen
         <Capture
-          doc={doc} retake={retake} paused={!!draft || asking} onAdd={addPage}
+          doc={doc} retake={retake} paused={!!draft || asking || recentOpen} onAdd={addPage}
+          onRecent={() => setRecentOpen(true)}
           onReview={() => { setRetake(null); setView('review'); }}
           onClose={leave}
         />
@@ -115,6 +118,13 @@ export default function Scanner() {
           doc={doc} setDoc={setDoc} onClose={leave} onSave={save}
           onAddMore={() => { setRetake(null); setView('capture'); }}
           onRetake={(p) => { setRetake(p); setView('capture'); }}
+        />
+      )}
+
+      {recentOpen && (
+        <RecentScans
+          onClose={() => setRecentOpen(false)}
+          onPick={(picked) => { setDoc(picked); setView('review'); setRecentOpen(false); setDraft(null); }}
         />
       )}
 

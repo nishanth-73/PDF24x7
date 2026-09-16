@@ -20,8 +20,9 @@ const FLASH: Record<string, [next: 'off' | 'on' | 'auto', icon: IconName]> = {
 };
 const moved = (a: Corners, b: Corners) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
 
-export function Capture({ doc, retake, paused, onAdd, onReview, onClose }: {
-  doc: ScanDoc; retake: Page | null; paused?: boolean; onAdd: (page: Page) => void; onReview: () => void; onClose: () => void;
+export function Capture({ doc, retake, paused, onAdd, onReview, onRecent, onClose }: {
+  doc: ScanDoc; retake: Page | null; paused?: boolean; onAdd: (page: Page) => void; onReview: () => void;
+  onRecent: () => void; onClose: () => void;
 }) {
   const win = useWindowDimensions();
   const [perm, requestPerm] = ImagePicker.useCameraPermissions();
@@ -45,9 +46,14 @@ export function Capture({ doc, retake, paused, onAdd, onReview, onClose }: {
   const boxH = (boxW * 4) / 3;
   const detecting = kind !== 'whiteboard';
 
+  // Ask once each time the camera opens. Android can report a never-asked permission as "denied", so don't wait for
+  // "undetermined"; after a permanent denial (canAskAgain false) the in-preview button opens Settings instead.
+  const asked = useRef(false);
   useEffect(() => {
-    if (perm?.status === 'undetermined') requestPerm(); // after a denial the in-preview button takes over
-  }, [perm?.status]);
+    if (!perm || perm.granted || !perm.canAskAgain || asked.current) return;
+    asked.current = true;
+    requestPerm();
+  }, [perm]);
 
   useEffect(() => { // reset the auto-capture tracker when the mode changes
     setFront(null);
@@ -145,6 +151,7 @@ export function Capture({ doc, retake, paused, onAdd, onReview, onClose }: {
         <Tap icon="close" label="Close" onPress={doc.pages.length ? onReview : onClose} />
         {!!retake && <Text style={s.barTitle}>Retake page</Text>}
         <View style={{ flexDirection: 'row' }}>
+          {!retake && !doc.pages.length && <Tap icon="history" label="Recent scans" onPress={onRecent} />}
           <Tap icon={flashIcon} label={`Flash ${flash}`} onPress={() => setFlash(flashNext)} />
           {detecting && (
             <Pressable onPress={() => setAuto(!auto)} style={s.autoBtn} accessibilityLabel={auto ? 'Auto capture on' : 'Auto capture off'}>

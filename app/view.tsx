@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Animated, BackHandler, FlatList, Image, Modal, PanResponder, PixelRatio, Platform, Pressable, ScrollView, Share,
+  ActivityIndicator, Animated, BackHandler, FlatList, Image, Modal, PanResponder, PixelRatio, Platform, Pressable, Share,
   StyleSheet, Text, TextInput, View, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { router, useLocalSearchParams } from 'expo-router';
 import { renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
 import { readPicked, share } from '../src/storage';
@@ -26,7 +28,7 @@ type PageItemProps = {
   index: number;
   totalPages: number;
   pageW: number;
-  zoom: number;
+  onZoomChange: (zoomed: boolean) => void;
   text?: string;
   isExpanded: boolean;
   isSearchHit: boolean;
@@ -34,12 +36,90 @@ type PageItemProps = {
   onCopyText: (text: string, pageNum: number) => void;
 };
 
+const MAX_ZOOM = 5;
+
+// Pinch, drag and double-tap zoom for one page. While a page is zoomed it reports back so the list stops scrolling
+// vertically, which leaves the drag to this page.
+function ZoomablePage({ uri, width, height, onZoomChange }: {
+  uri: string; width: number; height: number; onZoomChange: (zoomed: boolean) => void;
+}) {
+  const s = useStyles();
+  const scale = useSharedValue(1);
+  const start = useSharedValue(1);
+  const x = useSharedValue(0);
+  const y = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+
+  // Keeps the page from being dragged off screen: at scale s you can move half the overflow each way.
+  const clamp = () => {
+    'worklet';
+    const maxX = (width * (scale.value - 1)) / 2;
+    const maxY = (height * (scale.value - 1)) / 2;
+    x.value = Math.min(maxX, Math.max(-maxX, x.value));
+    y.value = Math.min(maxY, Math.max(-maxY, y.value));
+  };
+  const reset = () => {
+    'worklet';
+    scale.value = withTiming(1);
+    x.value = withTiming(0);
+    y.value = withTiming(0);
+    start.value = 1;
+    runOnJS(onZoomChange)(false);
+  };
+
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = Math.min(MAX_ZOOM, Math.max(0.8, start.value * e.scale));
+      clamp();
+    })
+    .onEnd(() => {
+      if (scale.value <= 1.01) reset();
+      else {
+        start.value = scale.value;
+        runOnJS(onZoomChange)(true);
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .onStart(() => { startX.value = x.value; startY.value = y.value; })
+    .onUpdate((e) => {
+      if (scale.value <= 1) return; // not zoomed: let the list scroll instead
+      x.value = startX.value + e.translationX;
+      y.value = startY.value + e.translationY;
+      clamp();
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (scale.value > 1.01) reset();
+      else {
+        scale.value = withTiming(2.5);
+        start.value = 2.5;
+        runOnJS(onZoomChange)(true);
+      }
+    });
+
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }],
+  }));
+
+  return (
+    <GestureDetector gesture={Gesture.Exclusive(doubleTap, Gesture.Simultaneous(pinch, pan))}>
+      <View style={{ width, height, overflow: 'hidden' }}>
+        <Reanimated.Image source={{ uri }} style={[s.page, { width, height }, zoomStyle]} resizeMode="contain" />
+      </View>
+    </GestureDetector>
+  );
+}
+
 const PageItem = memo(function PageItem({
   item,
   index,
   totalPages,
   pageW,
-  zoom,
+  onZoomChange,
   text,
   isExpanded,
   isSearchHit,
@@ -49,8 +129,7 @@ const PageItem = memo(function PageItem({
   const s = useStyles();
   const { c } = useTheme();
   const hasText = !!text;
-  const imgW = pageW * zoom;
-  const imgH = ((pageW * item.height) / item.width) * zoom;
+  const imgH = (pageW * item.height) / item.width;
 
   return (
     <View style={s.pageWrapper}>
@@ -62,14 +141,8 @@ const PageItem = memo(function PageItem({
         </View>
       )}
 
-      {/* Rendered Page Image (Scrollable horizontally when zoomed) */}
-      {zoom > 1 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <Image source={{ uri: item.uri }} style={[s.page, { width: imgW, height: imgH }]} resizeMode="contain" />
-        </ScrollView>
-      ) : (
-        <Image source={{ uri: item.uri }} style={[s.page, { width: imgW, height: imgH }]} resizeMode="contain" />
-      )}
+      {/* Rendered page: pinch, drag or double-tap to zoom */}
+      <ZoomablePage uri={item.uri} width={pageW} height={imgH} onZoomChange={onZoomChange} />
 
       {/* Page Footer Info & Selectable Text Trigger */}
       <View style={s.pageFooter}>
@@ -276,8 +349,8 @@ export default function Viewer() {
   const [error, setError] = useState('');
   const [mode, setMode] = useState<ViewMode>('pages');
 
-  // Zoom state (for page mode)
-  const [zoom, setZoom] = useState(1);
+  // A zoomed page takes over dragging, so the page list stops scrolling until you zoom back out.
+  const [zoomed, setZoomed] = useState(false);
 
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
@@ -544,6 +617,7 @@ export default function Viewer() {
             data={pages}
             keyExtractor={(p) => p.uri}
             {...listScroll}
+            scrollEnabled={!zoomed}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={s.list}
             initialNumToRender={2}
@@ -561,7 +635,7 @@ export default function Viewer() {
                 index={index}
                 totalPages={pages.length}
                 pageW={pageW}
-                zoom={zoom}
+                onZoomChange={setZoomed}
                 text={pageTextsMap.get(index)}
                 isExpanded={!!expandedTextPages[index]}
                 isSearchHit={searchHitIndices.has(index)}

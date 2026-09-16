@@ -95,10 +95,11 @@ export function LargeTitle({ title, sub }: { title: string; sub?: string }) {
   );
 }
 
-export function GroupLabel({ label, action, onAction }: { label: string; action?: string; onAction?: () => void }) {
+// `first`: the label directly under a control row (search, filters), so it doesn't add a section-sized gap.
+export function GroupLabel({ label, action, onAction, first }: { label: string; action?: string; onAction?: () => void; first?: boolean }) {
   const s = useStyles();
   return (
-    <View style={s.groupLabel}>
+    <View style={[s.groupLabel, first && { marginTop: 0 }]}>
       <Text style={s.groupLabelText}>{label}</Text>
       {!!action && <Text style={s.groupAction} onPress={onAction} suppressHighlighting>{action}</Text>}
     </View>

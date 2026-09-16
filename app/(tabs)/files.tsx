@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BackHandler, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { BackHandler, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   createFolder, listAllFiles, listFiles, listFolders, moveFile, moveFileToRoot, openFile, removeFile, removeFolder, renameFolder, share,
@@ -12,6 +12,8 @@ import {
 } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
 import { listDocs } from '../../src/scan/model';
+import { hasDriveCopies, keepInDriveOnly, onBackupChange, readBackup, syncLabel, syncNow } from '../../src/backup';
+import { DriveFiles } from '../../src/DriveFiles';
 
 type Filter = 'all' | 'pdf' | 'zip' | 'recent';
 const FILTERS: { key: Filter; label: string }[] = [
@@ -40,9 +42,14 @@ function applySearch(files: Saved[], query: string): Saved[] {
 export default function FilesTab() {
   const s = useStyles();
   const { c } = useTheme();
-  const [folders, setFolders] = useState<FolderWithCount[]>([]);
-  const [allFolders, setAllFolders] = useState<FolderWithCount[]>([]);
-  const [files, setFiles] = useState<Saved[]>([]);
+  // Read the file system before the first render, so the tab doesn't open empty and then jump to its content.
+  const [first] = useState(() => {
+    const all = listFolders().map((f) => ({ ...f, fileCount: listFiles(f.uri).length }));
+    return { folders: all, files: listFiles(), allFiles: listAllFiles() };
+  });
+  const [folders, setFolders] = useState<FolderWithCount[]>(first.folders);
+  const [allFolders, setAllFolders] = useState<FolderWithCount[]>(first.folders);
+  const [files, setFiles] = useState<Saved[]>(first.files);
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   const [currentFolder, setCurrentFolder] = useState<Folder | null>(null);
@@ -68,9 +75,24 @@ export default function FilesTab() {
   } | null>(null);
 
   const [movingFile, setMovingFile] = useState<Saved | null>(null);
+  // Deleting something that also lives in Google Drive: this phone only, or phone and Drive.
+  const [deleteChoice, setDeleteChoice] = useState<{ title: string; what: string; uris: string[]; remove: () => void } | null>(null);
 
-  const [allFiles, setAllFiles] = useState<Saved[]>([]);
+  const [allFiles, setAllFiles] = useState<Saved[]>(first.allFiles);
   const [scans, setScans] = useState<Map<string, string>>(new Map()); // PDF name -> scan id, for "Edit scan"
+  const [place, setPlace] = useState<'phone' | 'drive'>('phone');
+  const [driveFolder, setDriveFolder] = useState<string | null>(null); // open folder while viewing Google Drive
+  const [backup, setBackup] = useState(readBackup);
+  useFocusEffect(useCallback(() => { // opening Files also pulls in changes made in Drive
+    setBackup(readBackup());
+    if (readBackup().enabled) syncNow();
+  }, []));
+  const [menu, setMenu] = useState<{ kind: 'file'; item: Saved } | { kind: 'folder'; item: FolderWithCount } | null>(null);
+  // A small cloud next to synced PDFs instead of words in the subtitle.
+  const syncIcon = (f: Saved) => {
+    const l = syncLabel(backup, f.uri, f.name);
+    return l ? <Icon name={l === 'Synced' ? 'cloud-check-outline' : 'cloud-upload-outline'} size={17} color={l === 'Synced' ? c.faint : c.accent} /> : null;
+  };
 
   const refresh = useCallback(() => {
     const loadedFolders = listFolders().map((f) => ({
@@ -84,9 +106,14 @@ export default function FilesTab() {
     setScans(new Map(listDocs().flatMap((d) => (d.pdf ? [[d.pdf.name, d.id] as [string, string]] : []))));
   }, [currentFolder]);
   useFocusEffect(refresh);
+  useEffect(() => onBackupChange((st, running) => { // show files that sync downloaded or removed
+    setBackup(st);
+    if (!running) refresh();
+  }), [refresh]);
 
   const goBack = useCallback(() => {
     setCurrentFolder(null);
+    setDriveFolder(null);
     setQuery('');
     setFilter('all');
   }, []);
@@ -98,15 +125,24 @@ export default function FilesTab() {
   };
 
   // Intercept Android hardware back button when inside a folder so it returns to root Files screen
+  const folderName = place === 'drive' ? driveFolder : currentFolder?.name ?? null;
+  // Switching views keeps you in the same folder when it exists on the other side.
+  const switchPlace = (next: 'phone' | 'drive') => {
+    if (next === place) return;
+    if (next === 'drive') setDriveFolder(currentFolder?.name ?? null);
+    else setCurrentFolder(driveFolder ? allFolders.find((f) => f.name === driveFolder) ?? null : null);
+    setPlace(next);
+  };
+
   useEffect(() => {
-    if (!currentFolder) return;
+    if (!folderName) return;
     const backAction = () => {
       goBack();
       return true; // handled!
     };
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
     return () => backHandler.remove();
-  }, [currentFolder, goBack]);
+  }, [folderName, goBack]);
 
   const needle = query.trim();
   const filtered = applySearch(applyFilter(files, filter), needle);
@@ -181,6 +217,11 @@ export default function FilesTab() {
 
   const openDeleteFolderModal = (f: FolderWithCount) => {
     const count = f.fileCount;
+    const uris = listFiles(f.uri).map((x) => x.uri);
+    if (hasDriveCopies(uris)) {
+      setDeleteChoice({ title: 'Delete folder?', what: `"${f.name}" and ${plural(count, 'file')} inside`, uris, remove: () => removeFolder(f.uri) });
+      return;
+    }
     setConfirmConfig({
       visible: true,
       title: 'Delete folder?',
@@ -195,6 +236,10 @@ export default function FilesTab() {
   };
 
   const openDeleteFileModal = (f: Saved) => {
+    if (hasDriveCopies([f.uri])) {
+      setDeleteChoice({ title: 'Delete this file?', what: `"${f.name}"`, uris: [f.uri], remove: () => removeFile(f.uri) });
+      return;
+    }
     setConfirmConfig({
       visible: true,
       title: 'Delete this file?',
@@ -211,16 +256,31 @@ export default function FilesTab() {
   return (
     <Screen>
       {/* Header */}
-      {currentFolder ? (
+      {folderName ? (
         <View style={s.breadcrumb}>
           <Pressable onPress={goBack} style={s.backBtn} hitSlop={8}>
             <Icon name="arrow-left" size={20} color={c.ink} />
             <Text style={s.backText}>All Files</Text>
           </Pressable>
-          <LargeTitle title={currentFolder.name} sub={subtitle} />
+          <LargeTitle title={folderName} sub={place === 'drive' ? 'In Google Drive' : subtitle} />
         </View>
       ) : (
-        <LargeTitle title="Files" sub={subtitle} />
+        <LargeTitle title="Files" sub={place === 'drive' ? 'Synced with Google Drive' : subtitle} />
+      )}
+
+      {/* Phone / Google Drive switch, at the top level and inside folders */}
+      {(
+        <View style={s.seg}>
+          {([['phone', 'cellphone', 'On this phone'], ['drive', 'google-drive', 'Google Drive']] as const).map(([key, icon, label]) => {
+            const on = place === key;
+            return (
+              <Pressable key={key} onPress={() => switchPlace(key)} style={[s.segItem, on && s.segOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+                <Icon name={icon} size={17} color={on ? c.ink : c.sub} />
+                <Text style={[s.segText, on && s.segTextOn]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       )}
 
       {/* Search bar */}
@@ -233,6 +293,9 @@ export default function FilesTab() {
         {!!query && <IconBtn name="close-circle" size={18} color={c.faint} onPress={() => setQuery('')} />}
       </View>
 
+      {place === 'drive' ? (
+        <DriveFiles query={query} folder={driveFolder} onOpenFolder={(name) => { setDriveFolder(name); setQuery(''); }} />
+      ) : (<>
       {/* Filter chips */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
         {FILTERS.map((f) => (
@@ -242,19 +305,21 @@ export default function FilesTab() {
 
       {hasContent ? (
         <>
-          {/* Folders (only at root level, not shown when inside a folder) */}
-          {!currentFolder && folders.length > 0 && (
+          {/* Folders, with "New Folder" always first (root level only) */}
+          {!currentFolder && !needle && (
             <>
-              <GroupLabel label="Folders" action="+ New Folder" onAction={openNewFolderModal} />
+              <GroupLabel label="Folders" first />
               <Group>
-                {folders.map((f, i) => (
+                <Row
+                  first lead={<Icon name="folder-plus-outline" size={26} color={c.accent} />} title="New Folder"
+                  onPress={openNewFolderModal}
+                />
+                {folders.map((f) => (
                   <Row
-                    key={f.uri} first={i === 0} lead={<FolderGlyph />} title={f.name}
+                    key={f.uri} lead={<FolderGlyph />} title={f.name}
                     subtitle={`${plural(f.fileCount, 'file')}`} onPress={() => enterFolder(f)}
-                    chevron
                   >
-                    <IconBtn name="pencil-outline" size={16} color={c.sub} onPress={() => openRenameFolderModal(f)} />
-                    <IconBtn name="delete-outline" size={16} color={c.sub} onPress={() => openDeleteFolderModal(f)} />
+                    <IconBtn name="dots-vertical" color={c.sub} onPress={() => setMenu({ kind: 'folder', item: f })} />
                   </Row>
                 ))}
               </Group>
@@ -264,40 +329,21 @@ export default function FilesTab() {
           {/* Files */}
           {filtered.length > 0 && (
             <>
-              {!currentFolder && folders.length > 0 && <GroupLabel label="Files" />}
+              {!currentFolder && !needle && <GroupLabel label="Files" />}
               <Group>
                 {filtered.map((f, i) => (
                   <Row
                     key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
                     subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
                   >
-                    {scans.has(f.name) && (
-                      <IconBtn name="file-document-edit-outline" color={c.accent} onPress={() => router.push({ pathname: '/scanner', params: { id: scans.get(f.name)! } })} />
-                    )}
-                    <IconBtn name="folder-move-outline" size={18} color={c.sub} onPress={() => setMovingFile(f)} />
-                    <IconBtn name="share-variant-outline" onPress={() => share(f)} />
-                    <IconBtn name="delete-outline" onPress={() => openDeleteFileModal(f)} />
+                    {syncIcon(f)}
+                    <IconBtn name="dots-vertical" color={c.sub} onPress={() => setMenu({ kind: 'file', item: f })} />
                   </Row>
                 ))}
               </Group>
             </>
           )}
 
-          {/* "New folder" prompt when no folders exist yet */}
-          {!currentFolder && folders.length === 0 && (
-            <>
-              <GroupLabel label="Organize" />
-              <Group>
-                <Row
-                  first
-                  lead={<Icon name="folder-plus-outline" size={26} color={c.accent} />}
-                  title="New Folder"
-                  subtitle="Create a folder to organize your files"
-                  onPress={openNewFolderModal}
-                />
-              </Group>
-            </>
-          )}
         </>
       ) : files.length === 0 && !needle ? (
         <View style={s.empty}>
@@ -314,7 +360,7 @@ export default function FilesTab() {
             ) : (
               <>
                 <Button icon="folder-plus-outline" label="Create a folder" onPress={openNewFolderModal} />
-                <Button icon="camera-outline" label="Scan a document" variant="secondary" onPress={() => router.navigate('/scan')} />
+                <Button icon="camera-outline" label="Scan a document" variant="secondary" onPress={() => router.push('/scanner')} />
                 <Button label="Browse tools" variant="secondary" onPress={() => router.navigate('/')} />
               </>
             )}
@@ -323,6 +369,7 @@ export default function FilesTab() {
       ) : (
         <Text style={s.none}>No files match "{needle || filter}".</Text>
       )}
+      </>)}
 
       {/* ── Prompt Modal (New Folder / Rename Folder) ── */}
       {promptConfig && (
@@ -349,6 +396,59 @@ export default function FilesTab() {
           onConfirm={confirmConfig.onConfirm}
           onClose={() => setConfirmConfig(null)}
         />
+      )}
+
+      {/* ── Row menu ── */}
+      {menu && (
+        <DialogModal visible onClose={() => setMenu(null)} title={menu.item.name}>
+          <View style={{ marginTop: 8 }}>
+            {(menu.kind === 'file'
+              ? ([
+                  ...(scans.has(menu.item.name)
+                    ? [['file-document-edit-outline', 'Edit scan', () => router.push({ pathname: '/scanner', params: { id: scans.get(menu.item.name)! } })]] as const
+                    : []),
+                  ['share-variant-outline', 'Share', () => share(menu.item)],
+                  ['folder-move-outline', 'Move to folder', () => setMovingFile(menu.item as Saved)],
+                  ['delete-outline', 'Delete', () => openDeleteFileModal(menu.item as Saved)],
+                ] as const)
+              : ([
+                  ['pencil-outline', 'Rename', () => openRenameFolderModal(menu.item as FolderWithCount)],
+                  ['delete-outline', 'Delete', () => openDeleteFolderModal(menu.item as FolderWithCount)],
+                ] as const)
+            ).map(([icon, label, run]) => (
+              <Pressable
+                key={label} onPress={() => { setMenu(null); run(); }}
+                style={({ pressed }) => [s.moveOption, pressed && { backgroundColor: c.sunken }]}
+              >
+                <Icon name={icon} size={22} color={label === 'Delete' ? c.accent : c.ink} />
+                <Text style={[s.moveOptionTitle, label === 'Delete' && { color: c.accent }]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </DialogModal>
+      )}
+
+      {/* ── Delete choice (synced with Google Drive) ── */}
+      {deleteChoice && (
+        <DialogModal
+          visible onClose={() => setDeleteChoice(null)} title={deleteChoice.title}
+          subtitle={`${deleteChoice.what} ${deleteChoice.uris.length > 1 ? 'are' : 'is'} also in your Google Drive.`}
+        >
+          <View style={{ gap: 10, marginTop: 18 }}>
+            <Button
+              icon="cellphone-remove" label="Delete from this phone only" variant="secondary"
+              onPress={() => { keepInDriveOnly(deleteChoice.uris); deleteChoice.remove(); setDeleteChoice(null); refresh(); }}
+            />
+            <Button
+              icon="delete-outline" label="Delete from phone and Drive" variant="danger"
+              onPress={() => { deleteChoice.remove(); setDeleteChoice(null); refresh(); }}
+            />
+            <Text style={s.choiceNote}>
+              Phone only keeps the Drive copy; you can download it again from Files → Google Drive. Phone and Drive moves the
+              Drive copy to Drive's Trash for 30 days.
+            </Text>
+          </View>
+        </DialogModal>
       )}
 
       {/* ── Move File Modal ── */}
@@ -412,12 +512,17 @@ export default function FilesTab() {
 }
 
 const useStyles = makeStyles((c) => ({
+  seg: { flexDirection: 'row', padding: 3, borderRadius: radius.control, backgroundColor: c.sunken, marginBottom: 12 },
+  segItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: radius.control - 3 },
+  segOn: { backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
+  segText: { fontFamily: fonts.med, fontSize: 13.5, color: c.sub },
+  segTextOn: { color: c.ink },
   search: {
     flexDirection: 'row', alignItems: 'center', gap: 8, height: 46, paddingLeft: 12, paddingRight: 4,
     borderRadius: radius.control, backgroundColor: c.sunken,
   },
   searchInput: { flex: 1, fontFamily: fonts.sans, fontSize: 15.5, color: c.ink, paddingVertical: 0 },
-  chips: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4, paddingHorizontal: 2 },
+  chips: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 12, paddingHorizontal: 2 }, // same space above and below
   breadcrumb: { marginBottom: 12 },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
   backText: { fontFamily: fonts.med, fontSize: 14, color: c.sub },
@@ -443,6 +548,7 @@ const useStyles = makeStyles((c) => ({
     color: c.sub,
     marginTop: 1,
   },
+  choiceNote: { ...typo.small, color: c.sub, textAlign: 'center' },
   moveEmpty: {
     ...typo.small,
     color: c.sub,

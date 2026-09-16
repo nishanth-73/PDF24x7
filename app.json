@@ -22,7 +22,13 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,12 +39,28 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "PDF Tools uses the camera to scan documents into PDFs. Photos never leave your device."
+          "cameraPermission": "PDF Tools uses the camera to scan documents into PDFs. Photos are processed on your device.",
+          "microphonePermission": false,
+          "photosPermission": "PDF Tools opens photos you pick to turn them into PDF pages."
         }
       ],
       "expo-router",
       "./plugins/withMaxRefreshRate",
-      "./plugins/withArm64Only"
+      "./plugins/withArm64Only",
+      "./plugins/withReleaseSigning",
+      "./plugins/withNoSplash",
+      "./plugins/withNightBackground",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "useLegacyPackaging": true,
+            "extraProguardRules": "-keep class org.opencv.** { *; }"
+          }
+        }
+      ]
     ]
   }
 }

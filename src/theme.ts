@@ -1,13 +1,14 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Appearance, StyleSheet, useColorScheme, type TextStyle } from 'react-native';
 import { File, Paths } from 'expo-file-system';
+import * as SystemUI from 'expo-system-ui';
 // Per-weight imports: the package root would bundle all 18 Poppins files (~3 MB).
 import { Poppins_400Regular } from '@expo-google-fonts/poppins/400Regular';
 import { Poppins_500Medium } from '@expo-google-fonts/poppins/500Medium';
 import { Poppins_600SemiBold } from '@expo-google-fonts/poppins/600SemiBold';
 
-// White paper and ink with one red pencil. Dark is the same idea at night:
-// charcoal and bone, never neon on pure black.
+// White paper and ink with one red pencil. Dark is the same idea at night: neutral near-black and soft white,
+// with the same red as the only color.
 const light = {
   bg: '#FFFFFF', // screen background
   surface: '#FFFFFF', // grouped lists, inputs, tab bar (separated from bg by hairlines)
@@ -25,19 +26,19 @@ const light = {
 };
 export type Palette = typeof light;
 const dark: Palette = {
-  bg: '#141311',
-  surface: '#1D1C19',
-  sunken: '#27251F',
-  page: '#302D28',
-  ink: '#ECE6DA',
-  sub: '#A19A8D',
-  faint: '#6A6458',
-  line: '#302E29',
-  lineStrong: '#4A463E',
+  bg: '#0A0A0A', // near-black, neutral (no warm tint)
+  surface: '#151515',
+  sunken: '#1E1E1E',
+  page: '#262626',
+  ink: '#EDEDED',
+  sub: '#A1A1A1',
+  faint: '#6B6B6B',
+  line: '#242424',
+  lineStrong: '#363636',
   accent: '#E5694B',
-  accentSoft: '#3D251D',
+  accentSoft: '#2B1B17',
   accentInk: '#F2B8A6',
-  onInk: '#141311',
+  onInk: '#0A0A0A',
 };
 export const palettes = { light, dark };
 
@@ -106,6 +107,11 @@ function writePref(p: ThemePref) {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const system = useColorScheme();
   const [pref, setPref] = useState<ThemePref>(readPref);
+  const scheme: Scheme = pref === 'system' ? (system === 'dark' ? 'dark' : 'light') : pref;
+  useEffect(() => {
+    // The window behind the app (also what shows between screens) follows the theme.
+    SystemUI.setBackgroundColorAsync(palettes[scheme].bg).catch(() => {});
+  }, [scheme]);
   useEffect(() => {
     writePref(pref);
     try {
@@ -115,7 +121,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       // not supported on this platform
     }
   }, [pref]);
-  const scheme: Scheme = pref === 'system' ? (system === 'dark' ? 'dark' : 'light') : pref;
   const value = useMemo(() => ({ c: palettes[scheme], scheme, pref, setPref }), [scheme, pref]);
   return createElement(ThemeCtx.Provider, { value }, children);
 }

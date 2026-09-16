@@ -6,6 +6,7 @@ import { listAllFiles, openFile, share, type Saved } from '../../src/storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from '../../src/art';
 import { Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
+import { readBackup } from '../../src/backup';
 
 const open = (t: Tool) => (t.id === 'scan' ? router.push('/scanner') : router.push(`/tool/${t.id}`));
 
@@ -20,8 +21,10 @@ export default function Home() {
   const s = useStyles();
   const { c } = useTheme();
   const [q, setQ] = useState('');
-  const [recent, setRecent] = useState<Saved[]>([]);
-  const [allFiles, setAllFiles] = useState<Saved[]>([]);
+  const [allFiles, setAllFiles] = useState<Saved[]>(listAllFiles); // loaded before the first render: no empty flash
+  const [recent, setRecent] = useState<Saved[]>(() => allFiles.slice(0, 3));
+  const [synced, setSynced] = useState(() => readBackup().enabled);
+  useFocusEffect(useCallback(() => { setSynced(readBackup().enabled); }, []));
   useFocusEffect(useCallback(() => {
     const loaded = listAllFiles();
     setAllFiles(loaded);
@@ -60,7 +63,9 @@ export default function Home() {
         <Pressable onPress={() => router.push('/scanner')} style={({ pressed }) => [s.scan, pressed && { opacity: 0.95 }]}>
           <View style={{ flex: 1 }}>
             <Text style={s.scanTitle}>Scan a document</Text>
-            <Text style={s.scanSub}>Photograph pages, get one PDF. Nothing is uploaded.</Text>
+            <Text style={s.scanSub}>
+              Photograph pages, get one PDF. {synced ? 'Saved on your phone and synced to your Google Drive.' : 'Saved on your phone.'}
+            </Text>
             <View style={s.scanCta}>
               <Text style={s.scanCtaText}>Open camera</Text>
               <Icon name="arrow-right" size={16} color={c.onInk} />

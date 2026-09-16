@@ -86,7 +86,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'scan', section: 0, input: 'images', cta: 'Create PDF', doing: 'Building PDF',
     title: 'Scan Document',
-    desc: 'Use your camera to scan any document and export it as a PDF. 100% on-device.',
+    desc: 'Use your camera to scan any document and export it as a PDF, processed on your phone.',
     run: () => Promise.reject(new Error('Open the scanner from the Scan tab.')), // the scanner builds its own PDF
   },
   {
@@ -161,7 +161,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'rotate', section: 2, input: 'pdf', cta: 'Rotate PDF', doing: 'Rotating',
     title: 'Rotate PDF',
-    desc: 'Rotate individual pages or the entire PDF — 90°, 180°, 270° — 100% local.',
+    desc: 'Rotate individual pages or the entire PDF — 90°, 180°, 270°.',
     opts: [O.angle, text('pages', 'Pages (leave blank for all)', '', 'e.g. 1, 3-5')],
     run: one('rotated', P.rotate),
   },
@@ -193,7 +193,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'zip', section: 1, noPreview: true, input: 'pdfs', min: 1, cta: 'Create ZIP', doing: 'Zipping',
     title: 'PDF to ZIP',
-    desc: 'Bundle multiple PDFs into a single compressed ZIP archive — fully local, zero upload.',
+    desc: 'Bundle multiple PDFs into a single compressed ZIP archive.',
     run: async (files) => [{ name: 'bundle', bytes: P.zip(files), ext: 'zip' }],
   },
   {
