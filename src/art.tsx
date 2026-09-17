@@ -177,6 +177,23 @@ const ART: Record<string, (k: Kit) => ReactNode> = {
       </SvgText>
     </>
   ),
+  redact: (k) => (
+    <>
+      <Page x={9} y={5} w={30} h={38} k={k} lines={0} />
+      <Line x1={13.5} y1={17} x2={30} y2={17} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+      <Rect x={12.5} y={20.5} width={18} height={4.5} rx={1} fill={k.stroke} />
+      <Line x1={13.5} y1={29.5} x2={34.5} y2={29.5} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+      <Rect x={20} y={33} width={15} height={4.5} rx={1} fill={k.accent} />
+    </>
+  ),
+  password: (k) => (
+    <>
+      <Page x={7} y={5} w={26} h={34} k={k} lines={4} />
+      <Path d="M27.5 29V25A5 5 0 0 1 37.5 25V29" fill="none" stroke={k.accent} strokeWidth={2.2} />
+      <Rect x={24} y={28} width={17} height={14} rx={2.5} fill={k.accent} />
+      <Circle cx={32.5} cy={34.5} r={1.9} fill={k.fill} />
+    </>
+  ),
   pageNumbers: (k) => (
     <>
       <Page x={9} y={5} w={30} h={38} k={k} lines={4} />
@@ -219,8 +236,8 @@ export function ArtTile({ id, size = 44 }: { id: string; size?: number }) {
   );
 }
 
-// File thumbnail for lists: a page with a PDF / ZIP label.
-export function DocGlyph({ kind, size = 36 }: { kind: 'pdf' | 'zip'; size?: number }) {
+// File thumbnail for lists: a page with a PDF / ZIP / DOC / JPG label.
+export function DocGlyph({ kind, size = 36 }: { kind: DocKind; size?: number }) {
   const { c } = useTheme();
   const k = kitOf(c);
   return (
@@ -245,7 +262,11 @@ export function FolderGlyph({ size = 36 }: { size?: number }) {
   );
 }
 
-export const kindOf = (name: string): 'pdf' | 'zip' => (name.toLowerCase().endsWith('.zip') ? 'zip' : 'pdf');
+export type DocKind = 'pdf' | 'zip' | 'doc' | 'jpg';
+export const kindOf = (name: string): DocKind => {
+  const ext = name.toLowerCase().split('.').pop();
+  return ext === 'zip' ? 'zip' : ext === 'docx' ? 'doc' : ext === 'jpg' ? 'jpg' : 'pdf';
+};
 
 const useStyles = makeStyles((c) => ({
   tile: { backgroundColor: c.sunken, alignItems: 'center', justifyContent: 'center' },

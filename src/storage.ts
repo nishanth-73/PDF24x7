@@ -4,6 +4,7 @@ import { getContentUriAsync } from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { syncSoon } from './backup';
+import { pdfToDocx, pdfToJpeg } from '../modules/pdf-thumbnails';
 
 export type Saved = { name: string; uri: string; size: number; modified: number };
 export type Folder = { name: string; uri: string; created: number };
@@ -124,16 +125,55 @@ export function moveFileToRoot(fileUri: string): void {
 // ── File operations ─────────────────────────────────────────────────────
 
 // Never overwrites: "Report-merged.pdf" becomes "Report-merged (2).pdf" if taken.
-export function save(base: string, ext: string, bytes: Uint8Array, folderUri?: string): Saved & { bytes: Uint8Array } {
+function freeFile(base: string, ext: string, folderUri?: string) {
   const d = folderUri ? new Directory(folderUri) : rootFolder();
   if (!d.exists) d.create({ intermediates: true, idempotent: true });
   const clean = base.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document';
   let f = new File(d, `${clean}.${ext}`);
   for (let i = 2; f.exists; i++) f = new File(d, `${clean} (${i}).${ext}`);
+  return f;
+}
+
+export function save(base: string, ext: string, bytes: Uint8Array, folderUri?: string): Saved & { bytes: Uint8Array } {
+  const f = freeFile(base, ext, folderUri);
   f.create({ overwrite: true });
   f.write(bytes);
   syncSoon(); // no-op unless Google Drive sync is on
   return { name: f.name, uri: f.uri, size: bytes.length, modified: Date.now(), bytes };
+}
+
+// Keeps the extension; a name that's taken gets " (2)" like any save. Returns the file under its new name.
+export function renameFile(f: Saved, newName: string): Saved {
+  const dot = f.name.lastIndexOf('.');
+  const ext = dot > 0 ? f.name.slice(dot + 1) : 'pdf';
+  const base = newName.trim().replace(new RegExp(`\\.${ext}$`, 'i'), '');
+  if (!base || `${base}.${ext}` === f.name) return f;
+  const src = new File(f.uri);
+  const dest = freeFile(base, ext, src.parentDirectory.uri);
+  src.moveSync(dest);
+  syncSoon(); // Drive sync spots the same content under a new name and renames it there too
+  return { ...f, name: dest.name, uri: dest.uri };
+}
+
+// Copies a saved file to a folder the user picks (Downloads, an SD card…). Returns that folder's name, or '' if the
+// picker was closed. Android adds " (1)" itself if the name is taken there.
+export async function saveToDevice(f: { name: string; uri: string }): Promise<string> {
+  let dir: Directory;
+  try {
+    dir = await Directory.pickDirectoryAsync();
+  } catch {
+    return '';
+  }
+  dir.createFile(f.name, mimeOf(f.name)).write(new Uint8Array(await new File(f.uri).arrayBuffer()));
+  return decodeURIComponent(dir.uri).split(/[/:]/).filter(Boolean).pop() ?? 'your folder'; // …/tree/primary:Download -> Download
+}
+
+// Save as Word doc / Save as JPEG: converted natively, then moved in next to the PDF (not synced: Drive sync is PDFs only).
+export async function exportAs(pdf: Saved, to: 'docx' | 'jpeg'): Promise<Saved> {
+  const tmp = new File(to === 'docx' ? await pdfToDocx(pdf.uri) : await pdfToJpeg(pdf.uri));
+  const f = freeFile(pdf.name.replace(/\.pdf$/i, ''), tmp.uri.split('.').pop()!, new File(pdf.uri).parentDirectory.uri);
+  tmp.moveSync(f);
+  return { name: f.name, uri: f.uri, size: f.size ?? 0, modified: Date.now() };
 }
 
 export function listFiles(folderUri?: string): Saved[] {
@@ -215,13 +255,21 @@ export function saveTemp(name: string, bytes: Uint8Array) {
 
 // Tap-to-open: hand the PDF to whichever app the phone uses for PDFs. The file lives in this app's private storage, so
 // it goes out as a content:// uri with read permission. ZIPs (and phones with no PDF app) fall back to the share sheet.
+const MIME: Record<string, string> = {
+  pdf: 'application/pdf',
+  zip: 'application/zip',
+  jpg: 'image/jpeg',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+export const mimeOf = (name: string) => MIME[name.split('.').pop()!.toLowerCase()] ?? 'application/octet-stream';
+
 export async function openFile(f: { name: string; uri: string }) {
   if (f.name.toLowerCase().endsWith('.zip')) return share(f);
   try {
     const contentUri = await getContentUriAsync(f.uri);
     await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
       data: contentUri,
-      type: 'application/pdf',
+      type: mimeOf(f.name),
       flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
     });
   } catch {
@@ -229,7 +277,4 @@ export async function openFile(f: { name: string; uri: string }) {
   }
 }
 
-export const share = (f: { name: string; uri: string }) =>
-  Sharing.shareAsync(f.uri, f.name.toLowerCase().endsWith('.zip')
-    ? { mimeType: 'application/zip', UTI: 'public.zip-archive' }
-    : { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+export const share = (f: { name: string; uri: string }) => Sharing.shareAsync(f.uri, { mimeType: mimeOf(f.name) });

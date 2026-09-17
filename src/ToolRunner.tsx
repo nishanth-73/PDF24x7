@@ -1,31 +1,35 @@
 // One screen body for every tool: pick input -> set options -> run -> share results.
-import { memo, useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useCallback, useEffect, useRef, useState, type ComponentType, type Dispatch, type SetStateAction } from 'react';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { pageInfo, watermarkLayout, zip, type PageInfo, type PageOrder } from './pdf';
-import { defaults, stepTools, toolById, type Opts, type Tool, type WorkflowStep } from './tools';
+import { defaults, stepTools, toolById, type Opts, type Output, type Tool, type WorkflowStep } from './tools';
 import { openFile, readPicked, save, saveTemp, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, kindOf } from './art';
-import { renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
+import { pageSizes, renderThumbnails, unlockPdf, type Thumb } from '../modules/pdf-thumbnails';
 import {
-  Button, DragHandle, Group, GroupLabel, Icon, IconBtn, Options, Reorderable, Row, StepHead,
-  fmtSize, moveActions, plural, swap,
+  Button, DialogModal, DragHandle, PromptModal, Group, GroupLabel, Icon, IconBtn, Options, Reorderable, Row, StepHead,
+  fmtSize, moveActions, plural, stem, swap,
 } from './ui';
 import { AppFilesPickerModal, type PickedFile } from './AppFilesPickerModal';
+import { RedactEditor } from './RedactEditor';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 import { getToolDraft, setToolDraft } from './toolDraft';
 
 type Picked = PickedFile;
 type Result = Saved & { bytes: Uint8Array };
-type EditorProps = { file?: Picked; value: Opts; onChange: (o: Opts) => void; onError: (msg: string) => void };
+export type EditorProps = { file?: Picked; value: Opts; onChange: Dispatch<SetStateAction<Opts>>; onError: (msg: string) => void };
 
 const stripPdf = (name: string) => name.replace(/\.pdf$/i, '');
 const GAP = 10; // organize grid gap
 const AREA_H = 180; // organize page preview height
 const PREVIEW_H = 320; // watermark preview max height
 
-const EDITORS: Record<string, ComponentType<EditorProps>> = { organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor };
+const EDITORS: Record<string, ComponentType<EditorProps>> = {
+  organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor, redact: RedactEditor,
+};
+const EDITOR_TITLES: Record<string, string> = { organize: 'Arrange pages', workflow: 'Add steps', redact: 'Mark what to black out' };
 
 export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBack?: () => void; resume?: boolean }) {
   const s = useStyles();
@@ -45,19 +49,48 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
   // Only touches the saved draft once this screen has work of its own, so peeking at a tool keeps an older draft.
   const owns = useRef(!!draft);
   useEffect(() => {
-    if (files.length && !results.length) { owns.current = true; setToolDraft({ tool: tool.id, files, opts }); }
+    if (files.length && !results.length) {
+      owns.current = true;
+      setToolDraft({ tool: tool.id, files, opts: 'password' in opts ? { ...opts, password: '' } : opts }); // never on disk
+    }
     else if (owns.current) setToolDraft(null);
   }, [files, opts, results]);
 
   const changeFiles = (next: Picked[]) => { setFiles(next); setResults([]); setError(''); };
   const move = (from: number, to: number) => changeFiles(swap(files, from, to));
   const remove = (f: Picked) => changeFiles(files.filter((x) => x !== f));
+  const append = (more: Picked[]) => { setFiles((cur) => (multi ? [...cur, ...more] : more)); setResults([]); setError(''); };
+
+  // Encrypted PDFs are swapped for decrypted copies before any tool reads them (pdf-lib can't decrypt). Those that need a
+  // password wait in `locked` and are asked for one at a time.
+  const [locked, setLocked] = useState<Picked[]>([]);
+  const addFiles = async (picked: Picked[]) => {
+    const ready: Picked[] = [];
+    const needPassword: Picked[] = [];
+    for (const p of multi ? picked : picked.slice(0, 1)) {
+      const uri = await unlockPdf(p.uri, '').catch(() => p.uri); // unreadable here: let the tool explain what's wrong
+      if (uri) ready.push({ ...p, uri });
+      else needPassword.push(p);
+    }
+    if (ready.length) append(ready);
+    setLocked(needPassword);
+  };
 
   const pickPdf = async () => {
     const r = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', multiple: multi, copyToCacheDirectory: true });
     if (r.canceled) return;
-    const picked = r.assets.map((a) => ({ name: a.name, uri: a.uri, size: a.size }));
-    changeFiles(multi ? [...files, ...picked] : picked.slice(0, 1));
+    addFiles(r.assets.map((a) => ({ name: a.name, uri: a.uri, size: a.size })));
+  };
+
+  // Saving asks for a name first, filled in with the usual one ("Report-compressed"). For several outputs (splits) the
+  // name is the start of each part's name.
+  const [naming, setNaming] = useState<{ outs: Output[]; name: string } | null>(null);
+  const saveAs = (typed: string) => {
+    if (!naming) return;
+    const name = typed.replace(/\.(pdf|zip)$/i, '');
+    const { outs } = naming;
+    setResults(outs.map((o) => save(outs.length === 1 ? name : o.full ? o.name : o.name ? `${name}-${o.name}` : name, o.ext ?? 'pdf', o.bytes)));
+    setNaming(null);
   };
 
   const exec = async (mode: 'run' | 'preview') => {
@@ -72,7 +105,8 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
       const nameOf = (o: { name: string; full?: boolean }) => (o.full ? o.name : o.name ? `${base}-${o.name}` : base);
       // ponytail: multi-file outputs (splits) preview only the first part; add a picker if people ask for the rest.
       if (mode === 'preview') openFile(saveTemp(`${nameOf(outs[0])} (preview).pdf`, outs[0].bytes));
-      else setResults(outs.map((o) => save(nameOf(o), o.ext ?? 'pdf', o.bytes)));
+      else if (outs.every((o) => o.full)) setResults(outs.map((o) => save(o.name, o.ext ?? 'pdf', o.bytes))); // already named per input file
+      else setNaming({ outs, name: outs.length === 1 ? nameOf(outs[0]) : base });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -177,18 +211,24 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
         multi={multi}
         alreadySelectedUris={files.map((f) => f.uri)}
         onClose={() => setAppFilesOpen(false)}
-        onSelect={(picked) => {
-          changeFiles(
-            multi
-              ? [...files, ...picked.filter((p) => !files.some((x) => x.uri === p.uri))]
-              : picked.slice(0, 1)
-          );
-        }}
+        onSelect={(picked) => addFiles(multi ? picked.filter((p) => !files.some((x) => x.uri === p.uri)) : picked)}
+      />
+
+      <PasswordDialog
+        file={locked[0]}
+        onUnlock={(uri) => { append([{ ...locked[0], uri }]); setLocked(locked.slice(1)); }}
+        onSkip={() => setLocked(locked.slice(1))}
+      />
+
+      <PromptModal
+        visible={!!naming} title="Save as" placeholder="File name" initialValue={naming?.name} submitLabel="Save" cancelLabel="Discard"
+        subtitle={naming && naming.outs.length > 1 ? `Each of the ${naming.outs.length} files starts with this name.` : 'Saved in Files.'}
+        onSubmit={saveAs} onClose={() => setNaming(null)}
       />
 
       {(Editor || !!tool.opts?.length) && (
         <>
-          <StepHead n={2} title={tool.id === 'organize' ? 'Arrange pages' : tool.id === 'workflow' ? 'Add steps' : 'Options'} />
+          <StepHead n={2} title={EDITOR_TITLES[tool.id] ?? 'Options'} />
           {Editor
             ? <Editor file={files[0]} value={opts} onChange={setOpts} onError={setError} />
             : <Options defs={tool.opts ?? []} value={opts} onChange={setOpts} />}
@@ -216,7 +256,7 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
           <Group>
             {results.map((r, i) => (
               <Row
-                key={r.uri} first={i === 0} lead={<DocGlyph kind={kindOf(r.name)} />} title={r.name} onPress={() => openFile(r)}
+                key={r.uri} first={i === 0} lead={<DocGlyph kind={kindOf(r.name)} />} title={stem(r.name)} marquee onPress={() => openFile(r)}
                 subtitle={results.length === 1 && files.length === 1 && files[0].size ? `${fmtSize(files[0].size)} → ${fmtSize(r.size)}` : fmtSize(r.size)}
               >
                 <Pressable onPress={() => share(r)} style={({ pressed }) => [s.pill, pressed && { backgroundColor: c.sunken }]}>
@@ -230,6 +270,44 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
         </>
       )}
     </>
+  );
+}
+
+// Asks for the password of a picked PDF that needs one; a wrong password keeps the dialog open.
+function PasswordDialog({ file, onUnlock, onSkip }: { file?: Picked; onUnlock: (uri: string) => void; onSkip: () => void }) {
+  const s = useStyles();
+  const { c, scheme } = useTheme();
+  const [password, setPassword] = useState('');
+  const [shown, setShown] = useState(false);
+  const [wrong, setWrong] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setPassword(''); setWrong(false); }, [file?.uri]);
+  if (!file) return null;
+
+  const submit = async () => {
+    if (!password || busy) return;
+    setBusy(true);
+    const uri = await unlockPdf(file.uri, password).catch(() => null);
+    setBusy(false);
+    if (uri) onUnlock(uri);
+    else setWrong(true);
+  };
+  return (
+    <DialogModal visible onClose={onSkip} title="Password-protected PDF" subtitle={`Enter the password for “${stem(file.name)}” to use it here.`}>
+      <View style={[s.pwField, wrong && { borderColor: c.accent }]}>
+        <TextInput
+          value={password} onChangeText={(v) => { setPassword(v); setWrong(false); }} placeholder="Password" placeholderTextColor={c.faint}
+          secureTextEntry={!shown} autoFocus autoCapitalize="none" autoCorrect={false} keyboardAppearance={scheme}
+          returnKeyType="done" onSubmitEditing={submit} style={s.pwInput}
+        />
+        <IconBtn name={shown ? 'eye-off-outline' : 'eye-outline'} color={c.sub} onPress={() => setShown(!shown)} />
+      </View>
+      {wrong && <Text style={s.pwWrong}>That password didn’t open it. Try again.</Text>}
+      <View style={s.pwActions}>
+        <Button label="Skip" variant="secondary" onPress={onSkip} style={{ flex: 1 }} />
+        <Button label="Unlock" busy={busy} disabled={!password} onPress={submit} style={{ flex: 1 }} />
+      </View>
+    </DialogModal>
   );
 }
 
@@ -295,30 +373,29 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   const order: PageOrder[] = value.order ?? [];
   const restored = useRef(order.length > 0); // a resumed draft's order survives the first page load
   const set = (o: PageOrder[]) => onChange({ order: o });
-  const move = (from: number, to: number) => set(swap(order, from, to));
   const reset = (info: PageInfo[]) => set(info.map((_, i) => ({ i, rot: 0 })));
-
-  const handleRotate = useCallback((k: number) => {
-    set(order.map((x, j) => (j === k ? { ...x, rot: (x.rot + 90) % 360 } : x)));
-  }, [order]);
-
-  const handleDelete = useCallback((k: number) => {
-    set(order.map((x, j) => (j === k ? { ...x, del: !x.del } : x))); // toggles, so a deleted page can be restored
-  }, [order]);
+  // Updaters instead of closing over `order`, so these stay the same functions and one edit doesn't re-render every tile.
+  const edit = useCallback((fn: (o: PageOrder[]) => PageOrder[]) => onChange((v) => ({ order: fn(v.order ?? []) })), [onChange]);
+  const move = useCallback((from: number, to: number) => edit((o) => swap(o, from, to)), [edit]);
+  const handleRotate = useCallback((k: number) => edit((o) => o.map((x, j) => (j === k ? { ...x, rot: (x.rot + 90) % 360 } : x))), [edit]);
+  // toggles, so a deleted page can be restored
+  const handleDelete = useCallback((k: number) => edit((o) => o.map((x, j) => (j === k ? { ...x, del: !x.del } : x))), [edit]);
 
   useEffect(() => {
     if (!file) return;
     let live = true;
     setPages(null);
     setThumbs(null);
-    readPicked(file.uri).then(pageInfo)
-      .then((info) => {
+    // Page sizes come from Android's PDF renderer: parsing a big PDF with pdf-lib here froze the screen for seconds.
+    pageSizes(file.uri)
+      .then((sizes) => {
         if (!live) return;
+        const info = sizes.map((p) => ({ ...p, rot: 0 })); // already shown the way they're rotated
         setPages(info);
         if (restored.current) restored.current = false;
         else reset(info);
       })
-      .catch((e: Error) => live && onError(e.message));
+      .catch(() => live && onError('Could not read this PDF. It may be damaged or password-protected.'));
     // Render lightweight 200px thumbnails for smooth, low-memory drag reordering
     renderThumbnails(file.uri, 200).then((t) => live && setThumbs(t)).catch(() => {});
     return () => { live = false; };
@@ -366,8 +443,8 @@ function WatermarkEditor({ file, value, onChange, onError }: EditorProps) {
     setPage(null);
     if (!file) return;
     let live = true;
-    // ponytail: renders every page to show page 1; add a first-page-only native call if big PDFs feel slow.
-    Promise.all([readPicked(file.uri).then(pageInfo), renderThumbnails(file.uri, 480)])
+    // ponytail: pageInfo still parses the whole PDF in JS for page 1's /Rotate, which the native renderer can't report.
+    Promise.all([readPicked(file.uri).then(pageInfo), renderThumbnails(file.uri, 480, 1)])
       .then(([info, thumbs]) => { if (live && info[0] && thumbs[0]) setPage({ info: info[0], thumb: thumbs[0] }); })
       .catch((e: Error) => live && onError(e.message));
     return () => { live = false; };
@@ -500,6 +577,13 @@ const useStyles = makeStyles((c) => ({
   },
   addMoreText: { fontFamily: fonts.med, fontSize: 13.5, color: c.ink },
   cta: { marginTop: 28 },
+  pwField: {
+    flexDirection: 'row', alignItems: 'center', height: 48, marginTop: 14, paddingLeft: 14, paddingRight: 4,
+    borderRadius: radius.control, borderWidth: 1, borderColor: c.line, backgroundColor: c.surface,
+  },
+  pwInput: { flex: 1, fontFamily: fonts.sans, fontSize: 15, color: c.ink, paddingVertical: 0 },
+  pwWrong: { ...typo.small, color: c.accent, marginTop: 6 },
+  pwActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
   error: { flexDirection: 'row', gap: 8, marginTop: 14, padding: 12, borderRadius: radius.control, backgroundColor: c.accentSoft },
   errorText: { flex: 1, ...typo.small, fontSize: 14, color: c.accentInk },
   pill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: c.lineStrong },

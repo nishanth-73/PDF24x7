@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { listAllFiles, listFiles, listFolders, type Folder, type Saved } from './storage';
 import { DocGlyph, FolderGlyph, ToolArt } from './art';
-import { Button, Group, GroupLabel, Icon, IconBtn, fmtDate, fmtSize, plural } from './ui';
+import { Button, Group, GroupLabel, Icon, IconBtn, Marquee, fmtDate, fmtSize, plural, stem } from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 
 export type PickedFile = { name: string; uri: string; size?: number | null };
@@ -56,21 +56,23 @@ export function AppFilesPickerModal({
     setAllFiles(listAllFiles().filter((x) => x.name.toLowerCase().endsWith('.pdf')));
   }, [currentFolder]);
 
+  // Fresh state each time the picker opens. Only `visible` triggers it: this used to also depend on `reload`, which
+  // changes when a folder opens, so opening a folder reset straight back to the top level.
   useEffect(() => {
-    if (visible) {
-      setCurrentFolder(null);
-      setQuery('');
-      // Pre-populate selected map if URIs were passed
-      const initialMap: Record<string, PickedFile> = {};
-      const all = listAllFiles();
-      for (const uri of alreadySelectedUris) {
-        const found = all.find((f) => f.uri === uri);
-        if (found) initialMap[uri] = { name: found.name, uri: found.uri, size: found.size };
-      }
-      setSelectedMap(initialMap);
-      reload();
+    if (!visible) return;
+    setCurrentFolder(null);
+    setQuery('');
+    const initialMap: Record<string, PickedFile> = {};
+    const all = listAllFiles();
+    for (const uri of alreadySelectedUris) {
+      const found = all.find((f) => f.uri === uri);
+      if (found) initialMap[uri] = { name: found.name, uri: found.uri, size: found.size };
     }
-  }, [visible, reload, alreadySelectedUris]);
+    setSelectedMap(initialMap);
+  }, [visible]);
+  useEffect(() => {
+    if (visible) reload();
+  }, [visible, reload]);
 
   // Handle hardware back on Android
   useEffect(() => {
@@ -273,9 +275,7 @@ export function AppFilesPickerModal({
                       </View>
                       <View style={[s.rowBody, i > 0 && s.rowRule]}>
                         <View style={{ flex: 1 }}>
-                          <Text style={[s.rowTitle, isChecked && { color: c.accent }]} numberOfLines={1}>
-                            {f.name}
-                          </Text>
+                          <Marquee text={stem(f.name)} style={[s.rowTitle, isChecked && { color: c.accent }]} />
                           <Text style={s.rowSub} numberOfLines={1}>
                             {fmtSize(f.size)} · {fmtDate(f.modified)}
                           </Text>

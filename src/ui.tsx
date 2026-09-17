@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View,
-  type AccessibilityActionEvent, type StyleProp, type TextStyle, type ViewStyle,
+  type AccessibilityActionEvent, type KeyboardTypeOptions, type StyleProp, type TextStyle, type ViewStyle,
 } from 'react-native';
 import Animated, {
   Easing, cancelAnimation, useAnimatedRef, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence,
@@ -16,15 +16,40 @@ import type { IconName, OptDef, Opts } from './tools';
 export { Icon };
 
 export const pad = (n: number) => String(n).padStart(2, '0');
+export const fmtTime = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 export const fmtSize = (b?: number | null) =>
   b == null ? '' : b < 1024 ? `${b} B` : b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`;
-export const fmtDate = (ms: number) => {
+// dd/mm/yyyy everywhere a date is shown.
+export const fmtDay = (ms: number) => {
   const d = new Date(ms);
-  return d.toDateString() === new Date().toDateString()
-    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 };
+export const fmtDate = (ms: number) =>
+  new Date(ms).toDateString() === new Date().toDateString() ? fmtTime(ms) : fmtDay(ms);
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+// File names in lists drop the extension: the glyph beside them already says PDF, DOC, JPG or ZIP.
+export const stem = (name: string) => name.replace(/\.(pdf|docx|jpg|zip)$/i, '');
+
+// "Today · 17/09/2026", "Yesterday · …", a weekday within the past week ("Sunday · 13/09/2026"), then just the date.
+export function dayLabel(ms: number) {
+  const d = new Date(ms);
+  const now = new Date();
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 86400000); // round: DST days are 23 or 25 hours
+  const word = days === 0 ? 'Today' : days === 1 ? 'Yesterday' : days > 1 && days < 7 ? d.toLocaleDateString(undefined, { weekday: 'long' }) : '';
+  return word ? `${word} · ${fmtDay(ms)}` : fmtDay(ms);
+}
+
+// Splits a newest-first list into runs of the same day.
+export function byDay<T extends { modified: number }>(items: T[]) {
+  const groups: { label: string; items: T[] }[] = [];
+  for (const it of items) {
+    const label = dayLabel(it.modified);
+    if (groups[groups.length - 1]?.label !== label) groups.push({ label, items: [] });
+    groups[groups.length - 1].items.push(it);
+  }
+  return groups;
+}
 
 // The screen's scroll view, shared so drag-to-reorder lists can auto-scroll it near the edges.
 const ScrollRef = createContext<AnimatedRef<Animated.ScrollView> | undefined>(undefined);
@@ -112,20 +137,25 @@ export function Group({ children }: { children: ReactNode }) {
 }
 
 // List row with an inset separator that starts after the leading artwork, like native grouped lists.
-export function Row({ lead, title, subtitle, value, onPress, first, danger, chevron, marquee, children }: {
-  lead?: ReactNode; title: string; subtitle?: string; value?: string; onPress?: () => void;
+export function Row({ lead, title, subtitle, value, onPress, onLongPress, first, danger, chevron, marquee, children }: {
+  lead?: ReactNode; title: string; subtitle?: string; value?: string; onPress?: () => void; onLongPress?: () => void;
   first?: boolean; danger?: boolean; chevron?: boolean; marquee?: boolean; children?: ReactNode;
 }) {
   const s = useStyles();
   const { c } = useTheme();
   return (
-    <Pressable onPress={onPress} disabled={!onPress} style={({ pressed }) => [s.row, pressed && { backgroundColor: c.sunken }]}>
+    <Pressable
+      onPress={onPress} onLongPress={onLongPress} disabled={!onPress && !onLongPress}
+      style={({ pressed }) => [s.row, pressed && { backgroundColor: c.sunken }]}
+    >
       {lead}
       <View style={[s.rowBody, !first && s.rowRule]}>
         <View style={{ flex: 1 }}>
           {marquee
             ? <Marquee text={title} style={[s.rowTitle, danger && { color: c.accent }]} />
-            : <Text style={[s.rowTitle, danger && { color: c.accent }]} numberOfLines={1}>{title}</Text>}
+            : ( // middle: similar names ("Scan … 14.41", "Report (2)") differ at the end, so keep both ends visible
+              <Text style={[s.rowTitle, danger && { color: c.accent }]} numberOfLines={1} ellipsizeMode="middle">{title}</Text>
+            )}
           {!!subtitle && <Text style={s.rowSub} numberOfLines={2}>{subtitle}</Text>}
         </View>
         {!!value && <Text style={s.rowValue}>{value}</Text>}
@@ -340,6 +370,7 @@ export function PromptModal({
   initialValue = '',
   submitLabel = 'Save',
   cancelLabel = 'Cancel',
+  keyboardType,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -350,6 +381,7 @@ export function PromptModal({
   initialValue?: string;
   submitLabel?: string;
   cancelLabel?: string;
+  keyboardType?: KeyboardTypeOptions;
 }) {
   const s = useStyles();
   const { c, scheme } = useTheme();
@@ -370,6 +402,8 @@ export function PromptModal({
     <DialogModal visible={visible} onClose={onClose} title={title} subtitle={subtitle}>
       <TextInput
         autoFocus
+        selectTextOnFocus // the suggested name is selected, so typing replaces it and tapping keeps it for editing
+        keyboardType={keyboardType}
         value={val}
         onChangeText={setVal}
         placeholder={placeholder}

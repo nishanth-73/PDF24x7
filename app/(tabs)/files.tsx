@@ -2,16 +2,17 @@ import { useCallback, useEffect, useState } from 'react';
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
-  createFolder, listAllFiles, listFiles, listFolders, moveFile, moveFileToRoot, openFile, removeFile, removeFolder, renameFolder, share,
+  createFolder, listAllFiles, listFiles, renameFile, listFolders, moveFile, moveFileToRoot, openFile, removeFile, removeFolder, renameFolder, share,
   type Folder, type Saved,
 } from '../../src/storage';
 import { DocGlyph, FolderGlyph, ToolArt, kindOf } from '../../src/art';
 import {
   Button, Chip, ConfirmModal, DialogModal, Group, GroupLabel, Icon, IconBtn, LargeTitle, PromptModal, Row, Screen,
-  fmtDate, fmtSize, plural,
+  byDay, fmtSize, fmtTime, plural, stem,
 } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
-import { listDocs } from '../../src/scan/model';
+import { listDocs, relinkPdf } from '../../src/scan/model';
+import { ExportDialog, type ExportJob } from '../../src/ExportDialog';
 import { hasDriveCopies, keepInDriveOnly, onBackupChange, readBackup, syncLabel, syncNow } from '../../src/backup';
 import { DriveFiles } from '../../src/DriveFiles';
 
@@ -88,11 +89,9 @@ export default function FilesTab() {
     if (readBackup().enabled) syncNow();
   }, []));
   const [menu, setMenu] = useState<{ kind: 'file'; item: Saved } | { kind: 'folder'; item: FolderWithCount } | null>(null);
-  // A small cloud next to synced PDFs instead of words in the subtitle.
-  const syncIcon = (f: Saved) => {
-    const l = syncLabel(backup, f.uri, f.name);
-    return l ? <Icon name={l === 'Synced' ? 'cloud-check-outline' : 'cloud-upload-outline'} size={17} color={l === 'Synced' ? c.faint : c.accent} /> : null;
-  };
+  // Only files still waiting to upload get a cloud: a check on every synced row was noise, and "Synced" is the normal state.
+  const syncIcon = (f: Saved) =>
+    syncLabel(backup, f.uri, f.name) === 'Waiting to sync' ? <Icon name="cloud-upload-outline" size={17} color={c.accent} /> : null;
 
   const refresh = useCallback(() => {
     const loadedFolders = listFolders().map((f) => ({
@@ -235,6 +234,24 @@ export default function FilesTab() {
     });
   };
 
+  const [exporting, setExporting] = useState<ExportJob | null>(null);
+
+  const openRenameFileModal = (f: Saved) => {
+    setPromptConfig({
+      visible: true,
+      title: 'Rename File',
+      subtitle: `Rename "${f.name}"`,
+      placeholder: 'File name',
+      initialValue: stem(f.name),
+      submitLabel: 'Save',
+      onSubmit: (name) => {
+        const renamed = renameFile(f, name);
+        relinkPdf(f.uri, renamed);
+        refresh();
+      },
+    });
+  };
+
   const openDeleteFileModal = (f: Saved) => {
     if (hasDriveCopies([f.uri])) {
       setDeleteChoice({ title: 'Delete this file?', what: `"${f.name}"`, uris: [f.uri], remove: () => removeFile(f.uri) });
@@ -318,6 +335,7 @@ export default function FilesTab() {
                   <Row
                     key={f.uri} lead={<FolderGlyph />} title={f.name}
                     subtitle={`${plural(f.fileCount, 'file')}`} onPress={() => enterFolder(f)}
+                    onLongPress={() => setMenu({ kind: 'folder', item: f })}
                   >
                     <IconBtn name="dots-vertical" color={c.sub} onPress={() => setMenu({ kind: 'folder', item: f })} />
                   </Row>
@@ -326,23 +344,24 @@ export default function FilesTab() {
             </>
           )}
 
-          {/* Files */}
-          {filtered.length > 0 && (
-            <>
-              {!currentFolder && !needle && <GroupLabel label="Files" />}
+          {/* Files, one group per day, newest first */}
+          {byDay(filtered).map((g, gi) => (
+            <View key={g.label}>
+              <GroupLabel label={g.label} first={gi === 0 && (!!currentFolder || !!needle)} />
               <Group>
-                {filtered.map((f, i) => (
+                {g.items.map((f, i) => (
                   <Row
-                    key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
-                    subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
+                    key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={stem(f.name)} marquee
+                    subtitle={`${fmtSize(f.size)} · ${fmtTime(f.modified)}`} onPress={() => openFile(f)}
+                    onLongPress={() => setMenu({ kind: 'file', item: f })}
                   >
                     {syncIcon(f)}
                     <IconBtn name="dots-vertical" color={c.sub} onPress={() => setMenu({ kind: 'file', item: f })} />
                   </Row>
                 ))}
               </Group>
-            </>
-          )}
+            </View>
+          ))}
 
         </>
       ) : files.length === 0 && !needle ? (
@@ -408,6 +427,13 @@ export default function FilesTab() {
                     ? [['file-document-edit-outline', 'Edit scan', () => router.push({ pathname: '/scanner', params: { id: scans.get(menu.item.name)! } })]] as const
                     : []),
                   ['share-variant-outline', 'Share', () => share(menu.item)],
+                  ...(kindOf(menu.item.name) === 'pdf'
+                    ? [
+                        ['file-word-outline', 'Save as Word doc', () => setExporting({ pdf: menu.item as Saved, to: 'docx' })],
+                        ['file-image-outline', 'Save as JPEG', () => setExporting({ pdf: menu.item as Saved, to: 'jpeg' })],
+                      ] as const
+                    : []),
+                  ['pencil-outline', 'Rename', () => openRenameFileModal(menu.item as Saved)],
                   ['folder-move-outline', 'Move to folder', () => setMovingFile(menu.item as Saved)],
                   ['delete-outline', 'Delete', () => openDeleteFileModal(menu.item as Saved)],
                 ] as const)
@@ -427,6 +453,8 @@ export default function FilesTab() {
           </View>
         </DialogModal>
       )}
+
+      <ExportDialog job={exporting} onClose={() => setExporting(null)} onSaved={refresh} />
 
       {/* ── Delete choice (synced with Google Drive) ── */}
       {deleteChoice && (

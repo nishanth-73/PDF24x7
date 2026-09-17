@@ -3,11 +3,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
-  downloadDriveFile, isDriveOnly, isSyncing, listDriveFiles, onBackupChange, readBackup, restoreToPhone, syncNow, type DriveFile,
+  describeDriveError, downloadDriveFile, isDriveOnly, isSyncing, listDriveFiles, onBackupChange, readBackup, restoreToPhone, syncNow, type DriveFile,
 } from './backup';
 import { openFile, share } from './storage';
 import { DocGlyph, FolderGlyph } from './art';
-import { Button, Group, GroupLabel, Icon, IconBtn, Row, fmtDate, fmtSize, plural } from './ui';
+import { Button, Group, GroupLabel, Icon, IconBtn, Row, byDay, fmtSize, fmtTime, plural, stem } from './ui';
 import { makeStyles, typo, useTheme } from './theme';
 
 // `folder` null shows the top level (folders, then files); a name shows that folder's files.
@@ -26,7 +26,7 @@ export function DriveFiles({ query, folder, onOpenFolder }: { query: string; fol
     try {
       setData(await listDriveFiles());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeDriveError(e));
     }
   }, []);
   useEffect(() => onBackupChange((st, running) => {
@@ -55,7 +55,7 @@ export function DriveFiles({ query, folder, onOpenFolder }: { query: string; fol
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeDriveError(e));
     }
     setBusyId('');
   };
@@ -91,23 +91,27 @@ export function DriveFiles({ query, folder, onOpenFolder }: { query: string; fol
             </Group>
           </>
         )}
-        {shown.length > 0 && folders.length > 0 && <GroupLabel label="Files" />}
-        {shown.length > 0 && <Group>
-          {shown.map((f, i) => (
-            <Row
-              key={f.id} first={i === 0} lead={<DocGlyph kind="pdf" />} title={f.name}
-              subtitle={`${needle && f.folder ? `${f.folder} · ` : ''}${fmtSize(f.size)} · ${fmtDate(f.modified)}${isDriveOnly(backup, f) ? ' · Only in Drive' : ''}`}
-              onPress={busyId ? undefined : act(f, async () => openFile(await downloadDriveFile(f)))}
-            >
-              {busyId === f.id ? <ActivityIndicator color={c.accent} style={{ marginHorizontal: 10 }} /> : (
-                <>
-                  {isDriveOnly(backup, f) && <IconBtn name="download-outline" onPress={() => restoreToPhone(f)} />}
-                  <IconBtn name="share-variant-outline" onPress={act(f, async () => share(await downloadDriveFile(f)))} />
-                </>
-              )}
-            </Row>
-          ))}
-        </Group>}
+        {byDay(shown).map((g, gi) => (
+          <View key={g.label}>
+            <GroupLabel label={g.label} first={gi === 0 && !folders.length} />
+            <Group>
+              {g.items.map((f, i) => (
+                <Row
+                  key={f.id} first={i === 0} lead={<DocGlyph kind="pdf" />} title={stem(f.name)} marquee
+                  subtitle={`${needle && f.folder ? `${f.folder} · ` : ''}${fmtSize(f.size)} · ${fmtTime(f.modified)}${isDriveOnly(backup, f) ? ' · Only in Drive' : ''}`}
+                  onPress={busyId ? undefined : act(f, async () => openFile(await downloadDriveFile(f)))}
+                >
+                  {busyId === f.id ? <ActivityIndicator color={c.accent} style={{ marginHorizontal: 10 }} /> : (
+                    <>
+                      {isDriveOnly(backup, f) && <IconBtn name="download-outline" onPress={() => restoreToPhone(f)} />}
+                      <IconBtn name="share-variant-outline" onPress={act(f, async () => share(await downloadDriveFile(f)))} />
+                    </>
+                  )}
+                </Row>
+              ))}
+            </Group>
+          </View>
+        ))}
         </>
       ) : data && (
         <Text style={s.none}>

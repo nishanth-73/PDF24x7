@@ -4,6 +4,7 @@
 // sees what it created. Each run is a three-way compare of phone, Drive and the state after the last successful sync.
 import { Directory, File, Paths } from 'expo-file-system';
 import { chooseGoogleAccount, clearDriveToken, getDriveToken } from '../modules/google-auth';
+import { setFileModified } from '../modules/pdf-thumbnails';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
@@ -108,25 +109,41 @@ const trashInDrive = (token: string, id: string) =>
   });
 
 // Streams a local file into Drive: into `id` when it exists, otherwise a new file under `parent`.
-async function uploadToDrive(token: string, file: File, name: string, parent: string, id?: string) {
+async function uploadToDrive(token: string, file: File, name: string, parent: string, id?: string, mimeType = 'application/pdf') {
   if (!id) {
-    id = (await call(token, `${API}/files?fields=id`, { method: 'POST', body: JSON.stringify({ name, parents: [parent], mimeType: 'application/pdf' }) })).id as string;
+    id = (await call(token, `${API}/files?fields=id`, { method: 'POST', body: JSON.stringify({ name, parents: [parent], mimeType }) })).id as string;
   }
   const res = await file.upload(`${UPLOAD}/files/${id}?uploadType=media&fields=id,modifiedTime,size`, {
-    httpMethod: 'PATCH', mimeType: 'application/pdf', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/pdf' },
+    httpMethod: 'PATCH', mimeType, headers: { Authorization: `Bearer ${token}`, 'Content-Type': mimeType },
   });
   if (res.status < 200 || res.status >= 300) throw new DriveError(res.status, res.body);
   const meta = JSON.parse(res.body);
   return { id: meta.id as string, driveModified: meta.modifiedTime as string };
 }
 
-async function downloadFromDrive(token: string, id: string, dest: File) {
+// `modified` (Drive's modifiedTime) becomes the file's date, so Files sorts and groups it by when it was made, not downloaded.
+async function downloadFromDrive(token: string, id: string, dest: File, modified?: string) {
   const dir = dest.parentDirectory;
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
   const tmp = new File(Paths.cache, `drive-${id}.part`);
   await File.downloadFileAsync(`${API}/files/${id}?alt=media`, tmp, { headers: { Authorization: `Bearer ${token}` }, idempotent: true });
   if (dest.exists) dest.delete(); // only replaced once the download fully succeeded
   tmp.moveSync(dest);
+  if (modified) setFileModified(dest.uri, Date.parse(modified));
+}
+
+/** Sync and Drive errors in words people can act on, instead of raw Java exceptions or API bodies. */
+export function describeDriveError(e: unknown): string {
+  if (e instanceof DriveError) {
+    if (e.status === 401) return 'Google sign-in expired. Turn sync off and on again in Settings.';
+    if (e.status === 403 || e.status === 429) return 'Google Drive is limiting requests right now. Sync will try again later.';
+    return `Google Drive had a problem (error ${e.status}). Sync will try again later.`;
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/network request failed|timeout|timed out|unknownhost|unable to resolve|failed to connect|connection|socket/i.test(msg)) {
+    return 'Couldn’t reach Google Drive. Check your connection; sync tries again when you open Files or save a file.';
+  }
+  return msg; // our own messages, like PDFs missing from Drive, are already readable
 }
 
 // ── Local side ──────────────────────────────────────────────────────────────
@@ -210,7 +227,7 @@ async function syncOnce() {
     await withToken(email, (token) => reconcile(token, email, mine));
     mine((x) => ({ ...x, lastSync: Date.now(), error: undefined }));
   } catch (e) {
-    mine((x) => ({ ...x, error: e instanceof Error ? e.message : String(e) }));
+    mine((x) => ({ ...x, error: describeDriveError(e) }));
   }
 }
 
@@ -351,21 +368,26 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
       const phoneEdit = localChanged(rel);
       const driveEdit = r.modified !== e.driveModified;
       if (phoneEdit && driveEdit) { // edited on both sides: keep both versions
-        await downloadFromDrive(token, r.id, localFile(conflictName(rel, local.files)));
+        await downloadFromDrive(token, r.id, localFile(conflictName(rel, local.files)), r.modified);
         const up = await uploadToDrive(token, l.file, split(rel)[1], r.parent, r.id);
         record(rel, up.id, up.driveModified, l.file);
       } else if (phoneEdit) {
         const up = await uploadToDrive(token, l.file, split(rel)[1], r.parent, r.id);
         record(rel, up.id, up.driveModified, l.file);
       } else if (driveEdit) {
-        await downloadFromDrive(token, r.id, l.file);
+        await downloadFromDrive(token, r.id, l.file, r.modified);
+        record(rel, r.id, r.modified, localFile(rel));
+      } else if (Date.parse(r.modified) < l.modified - 60_000) {
+        // Downloaded before dates were kept, so it's dated when it arrived. Drive's older date is when it was really made
+        // (a file made on this phone is always older here than in Drive, so those are never touched).
+        setFileModified(l.file.uri, Date.parse(r.modified));
         record(rel, r.id, r.modified, localFile(rel));
       }
     } else if (l && r && !e) { // on both sides but never linked (first sync, or created twice)
       if (l.size === r.size && (!r.md5 || r.md5 === l.file.md5)) { // same content: just link them
         record(rel, r.id, r.modified, l.file);
       } else {
-        await downloadFromDrive(token, r.id, localFile(conflictName(rel, local.files)));
+        await downloadFromDrive(token, r.id, localFile(conflictName(rel, local.files)), r.modified);
         const up = await uploadToDrive(token, l.file, split(rel)[1], r.parent, r.id);
         record(rel, up.id, up.driveModified, l.file);
       }
@@ -388,7 +410,7 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
         delete entries[rel];
         save();
       } else if (r.modified !== e.driveModified) { // but edited in Drive since: bring the new version back
-        await downloadFromDrive(token, r.id, localFile(rel));
+        await downloadFromDrive(token, r.id, localFile(rel), r.modified);
         record(rel, r.id, r.modified, localFile(rel));
       } else {
         await trashInDrive(token, r.id);
@@ -396,7 +418,7 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
         save();
       }
     } else if (!l && r && !e) { // new in Drive
-      await downloadFromDrive(token, r.id, localFile(rel));
+      await downloadFromDrive(token, r.id, localFile(rel), r.modified);
       record(rel, r.id, r.modified, localFile(rel));
     } else { // gone from both sides
       delete entries[rel];
@@ -537,6 +559,13 @@ export async function listDriveFiles(): Promise<{ folders: string[]; files: Driv
     }
     return { folders: [...new Set(folders)].sort((a, b) => a.localeCompare(b)), files: out.sort((a, b) => b.modified - a.modified) };
   });
+}
+
+/** Uploads a copy of any saved file (Word doc, JPEGs…) to the Drive "PDF Tools" folder. Sync only handles PDFs, so it's left alone there. */
+export async function saveCopyToDrive(f: { name: string; uri: string }, mimeType: string) {
+  const s = readBackup();
+  if (!s.enabled || !s.email) throw new Error('Google Drive sync is off.');
+  await withToken(s.email, async (token) => uploadToDrive(token, new File(f.uri), f.name, await ensureRoot(token, s.folderId), undefined, mimeType));
 }
 
 /** A temporary local copy of a Drive file, for opening or sharing. */

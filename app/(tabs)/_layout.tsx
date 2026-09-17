@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { Pressable, StyleSheet, Text, View, type ColorValue } from 'react-native';
-import { Tabs, router, usePathname } from 'expo-router';
+import { Tabs, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, plural } from '../../src/ui';
 import { fonts, radius, useTheme } from '../../src/theme';
@@ -12,6 +12,15 @@ import type { IconName } from '../../src/tools';
 const icon = (name: IconName) => ({ color }: { color: ColorValue }) => <Icon name={name} size={22} color={color} />;
 
 const RESUME_H = 64; // space the resume bar takes above the tab bar
+
+// The scanner covers the tab bar once open, so only a quick double tap could push it twice. A time guard does that
+// without usePathname, which re-rendered the whole tab navigator on every navigation.
+let scanOpenedAt = 0;
+const openScanner = () => {
+  if (Date.now() - scanOpenedAt < 1000) return;
+  scanOpenedAt = Date.now();
+  router.push('/scanner');
+};
 
 const s = StyleSheet.create({
   // Sits inside the bar like the other tabs, but filled in the accent color so it stands out.
@@ -37,7 +46,6 @@ const s = StyleSheet.create({
 
 export default function TabsLayout() {
   const { c } = useTheme();
-  const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const bottomPad = insets.bottom + 10; // extra space under the labels, above the gesture bar
   const barH = 58 + bottomPad;
@@ -80,7 +88,7 @@ export default function TabsLayout() {
             // A raised round button, not a screen: it opens the camera over whichever tab you're on.
             tabBarButton: () => (
               <Pressable
-                onPress={() => { if (pathname !== '/scanner') router.push('/scanner'); }}
+                onPress={openScanner}
                 accessibilityRole="button" accessibilityLabel="Scan a document"
                 style={({ pressed }) => [{ flex: 1, alignItems: 'center', justifyContent: 'flex-start' }, pressed && { opacity: 0.9 }]}
               >

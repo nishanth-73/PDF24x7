@@ -1,11 +1,11 @@
 // Every operation runs on-device with pure-JS libs: bytes in, bytes out.
 import {
   PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFStream, PDFString,
-  StandardFontEmbedder, StandardFonts, clip, decodePDFRawStream, degrees, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb,
+  ParseSpeeds, StandardFontEmbedder, StandardFonts, clip, decodePDFRawStream, degrees, endPath, popGraphicsState, pushGraphicsState,
+  rectangle, rgb,
 } from 'pdf-lib';
 import type { PDFImage, PDFObject, PDFPage } from 'pdf-lib';
 import { zipSync } from 'fflate';
-import jpeg from 'jpeg-js';
 
 export type Named = { name: string; bytes: Uint8Array };
 export type PageInfo = { width: number; height: number; rot: number };
@@ -19,17 +19,20 @@ export const SIZES = { A4, A5: [419.53, 595.28], Letter: [612, 792], Legal: [612
 export type PaperSize = keyof typeof SIZES;
 const range = (n: number, from = 0) => Array.from({ length: Math.max(0, n) }, (_, i) => from + i);
 
+// pdf-lib pauses on a setTimeout every 100 objects read and 50 written by default; big PDFs spent seconds just waiting.
+// ponytail: ~1500 objects between pauses keeps the JS thread breathing; raise it if runs still feel slow.
 const load = (bytes: Uint8Array): Promise<PDFDocument> =>
-  PDFDocument.load(bytes).catch((e: unknown) => {
+  PDFDocument.load(bytes, { parseSpeed: ParseSpeeds.Fast }).catch((e: unknown) => {
     throw new Error(/encrypt/i.test(String(e))
       ? 'This PDF is password-protected. Unlock it first.'
       : 'Could not read this PDF. The file may be damaged.');
   });
+const save = (doc: PDFDocument, opts: { useObjectStreams?: boolean } = {}) => doc.save({ objectsPerTick: 1500, ...opts });
 
 async function pick(src: PDFDocument, indices: number[]): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   (await out.copyPages(src, indices)).forEach((p) => out.addPage(p));
-  return out.save();
+  return save(out);
 }
 
 // "1-3, 5, 8-" -> [[0,1,2],[4],[7..n-1]]
@@ -54,7 +57,7 @@ export async function merge(files: Named[]) {
     const src = await load(f.bytes);
     (await out.copyPages(src, src.getPageIndices())).forEach((p) => out.addPage(p));
   }
-  return out.save();
+  return save(out);
 }
 
 export async function alternate(files: Named[], { reverse = false }: { reverse?: boolean } = {}) {
@@ -67,34 +70,23 @@ export async function alternate(files: Named[], { reverse = false }: { reverse?:
   }
   const longest = Math.max(...stacks.map((s) => s.length));
   for (let i = 0; i < longest; i++) stacks.forEach((s) => s[i] && out.addPage(s[i]));
-  return out.save();
+  return save(out);
 }
 
-function encodeJpeg(img: { width: number; height: number; data: Uint8Array }, quality: number): Uint8Array {
-  // ponytail: jpeg-js's encoder calls Buffer.from under CommonJS and RN has no Buffer,
-  // so lend a stub for this synchronous call. Swap for a native image lib if speed matters.
-  const g = globalThis as { Buffer?: unknown };
-  const had = g.Buffer;
-  if (!had) g.Buffer = { from: (a: ArrayLike<number>) => Uint8Array.from(a) };
-  try {
-    return new Uint8Array(jpeg.encode(img, quality).data);
-  } finally {
-    if (!had) delete g.Buffer;
-  }
-}
+// JPEG in, smaller RGB JPEG out (null to keep the original). The app passes the native encoder; the Node check, jpeg-js.
+export type RecodeJpeg = (jpeg: Uint8Array, quality: number) => Promise<Uint8Array | null>;
 
 // Re-encodes embedded JPEG photos/scans (where the bulk of a PDF's size lives),
 // drops XMP metadata and packs objects into compressed object streams.
-export async function compress(bytes: Uint8Array, { quality = 60 }: { quality?: Num } = {}) {
+export async function compress(bytes: Uint8Array, { quality = 60 }: { quality?: Num } = {}, recode: RecodeJpeg) {
   const doc = await load(bytes);
   for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
     if (!(obj instanceof PDFRawStream)) continue;
     const d = obj.dict;
     if (d.get(N('Subtype')) !== N('Image') || d.get(N('Filter')) !== N('DCTDecode')) continue;
     try {
-      const img = jpeg.decode(obj.contents, { useTArray: true, formatAsRGBA: true });
-      const out = encodeJpeg(img, Number(quality));
-      if (out.length >= obj.contents.length) continue;
+      const out = await recode(obj.contents, Number(quality));
+      if (!out || out.length >= obj.contents.length) continue;
       d.set(N('ColorSpace'), N('DeviceRGB'));
       d.delete(N('Decode'));
       d.set(N('Length'), PDFNumber.of(out.length));
@@ -104,7 +96,7 @@ export async function compress(bytes: Uint8Array, { quality = 60 }: { quality?: 
     }
   }
   doc.catalog.delete(N('Metadata'));
-  return doc.save({ useObjectStreams: true });
+  return save(doc, { useObjectStreams: true });
 }
 
 export async function split(bytes: Uint8Array, { mode = 'every', ranges = '' }: { mode?: string; ranges?: string } = {}) {
@@ -257,7 +249,7 @@ export async function splitHalf(bytes: Uint8Array, { mode = 'file' }: { mode?: s
       : [[x, y + h / 2, w, h / 2], [x, y, w, h / 2]];
     halves.forEach((p, k) => { p.setMediaBox(...boxes[k]); p.setCropBox(...boxes[k]); out.addPage(p); });
   }
-  return [{ name: 'sliced', bytes: await out.save() }];
+  return [{ name: 'sliced', bytes: await save(out) }];
 }
 
 export async function splitBySize(bytes: Uint8Array, { maxMB = 5 }: { maxMB?: Num } = {}): Promise<Named[]> {
@@ -290,7 +282,7 @@ export async function rotate(bytes: Uint8Array, { angle = 90, pages = '' }: { an
     const p = doc.getPage(i);
     p.setRotation(degrees((p.getRotation().angle + Number(angle)) % 360));
   });
-  return doc.save();
+  return save(doc);
 }
 
 // ponytail: flip / n-up / resize redraw pages via embedPage, which ignores a page's /Rotate.
@@ -304,7 +296,7 @@ export async function flip(bytes: Uint8Array, { axis = 'h' }: { axis?: string } 
       x: fx ? e.width : 0, y: fy ? e.height : 0, xScale: fx ? -1 : 1, yScale: fy ? -1 : 1,
     });
   });
-  return out.save();
+  return save(out);
 }
 
 const GRID: Record<string, [cols: number, rows: number]> = { 2: [2, 1], 4: [2, 2], 6: [2, 3], 9: [3, 3], 16: [4, 4] };
@@ -335,7 +327,7 @@ export async function nUp(bytes: Uint8Array, { perSheet = 4, lines = false }: { 
       xScale: s, yScale: s,
     });
   });
-  return out.save();
+  return save(out);
 }
 
 export async function cropResize(
@@ -350,7 +342,7 @@ export async function cropResize(
       if (pt * 2 >= Math.min(width, height)) throw new Error('Margin is larger than the page.');
       p.setCropBox(x + pt, y + pt, width - pt * 2, height - pt * 2);
     });
-    return src.save();
+    return save(src);
   }
   const [a, b] = SIZES[size as PaperSize] ?? A4;
   const out = await PDFDocument.create();
@@ -359,7 +351,7 @@ export async function cropResize(
     const s = Math.min(W / e.width, H / e.height);
     out.addPage([W, H]).drawPage(e, { x: (W - e.width * s) / 2, y: (H - e.height * s) / 2, xScale: s, yScale: s });
   });
-  return out.save();
+  return save(out);
 }
 
 // Diagonal watermark geometry in page points; the tool preview uses it too so both match.
@@ -385,7 +377,7 @@ export async function watermark(bytes: Uint8Array, { text = 'CONFIDENTIAL', opac
       size, font, color: rgb(0.82, 0.27, 0.17), opacity: Number(opacity), rotate: degrees((a * 180) / Math.PI),
     });
   });
-  return doc.save();
+  return save(doc);
 }
 
 export async function pageNumbers(bytes: Uint8Array, { position = 'center', format = 'n' }: { position?: string; format?: string } = {}) {
@@ -399,7 +391,7 @@ export async function pageNumbers(bytes: Uint8Array, { position = 'center', form
     const lx = position === 'left' ? x + 28 : position === 'right' ? x + width - 28 - tw : x + (width - tw) / 2;
     p.drawText(label, { x: lx, y: y + 20, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
   });
-  return doc.save();
+  return save(doc);
 }
 
 export async function organize(bytes: Uint8Array, all: PageOrder[]) {
@@ -411,7 +403,7 @@ export async function organize(bytes: Uint8Array, all: PageOrder[]) {
     p.setRotation(degrees((p.getRotation().angle + order[k].rot) % 360));
     out.addPage(p);
   });
-  return out.save();
+  return save(out);
 }
 
 // ── Scanned pages ──────────────────────────────────────────────────────────
@@ -477,7 +469,7 @@ export async function imagesToPdf(pages: ScanPdfPage[]) {
       for (const it of sheet.items) drawCropped(page, embedded[it.img], it.crop, it.x, it.y, it.w, it.h);
     }
   }
-  return doc.save();
+  return save(doc);
 }
 
 export function zip(files: Named[]): Uint8Array {

@@ -157,6 +157,15 @@ const signature = (doc: ScanDoc) => JSON.stringify([doc.name, doc.pages.map((p) 
 /** True for a draft that was never saved, or a saved scan edited since. */
 export const isDirty = (doc: ScanDoc) => !doc.saved || doc.saved.sig !== signature(doc);
 
+/** After its PDF is renamed in Files: the scan takes the new name, so "Edit scan" still finds it and a re-save keeps it. */
+export function relinkPdf(oldUri: string, pdf: { uri: string; name: string }) {
+  const doc = listDocs().find((d) => d.pdf?.uri === oldUri);
+  if (!doc) return;
+  const next = { ...doc, name: pdf.name.replace(/\.pdf$/i, ''), pdf };
+  const clean = doc.saved && !isDirty(doc); // a saved scan stays "Saved" rather than turning into "Unsaved changes"
+  saveDoc(clean ? { ...next, saved: { ...doc.saved!, name: next.name, sig: signature(next) } } : next);
+}
+
 /** The most recent scan with unsaved work, to offer "Continue" when the scanner opens. */
 export const latestDraft = () => listDocs().find(isDirty) ?? null;
 

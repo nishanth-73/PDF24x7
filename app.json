@@ -7,6 +7,9 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
+    "experiments": {
+      "reactCompiler": true
+    },
     "backgroundColor": "#FFFFFF",
     "ios": {
       "bundleIdentifier": "com.sammyi57.pdftools",
@@ -57,7 +60,7 @@
             "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
             "useLegacyPackaging": true,
-            "extraProguardRules": "-keep class org.opencv.** { *; }"
+            "extraProguardRules": "-keep class org.opencv.** { *; }\n-keep class com.tom_roush.** { *; }\n-dontwarn com.gemalto.jp2.**"
           }
         }
       ]

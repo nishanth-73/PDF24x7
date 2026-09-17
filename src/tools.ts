@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import type { KeyboardTypeOptions } from 'react-native';
 import type { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as P from './pdf';
+import { recompressJpeg, redactPdf, setPdfPassword } from '../modules/pdf-thumbnails';
 
 export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 // Option values come straight from the UI: strings, or booleans for toggles.
@@ -56,8 +57,9 @@ const one = (suffix: string, fn: BytesOp) => async ([f]: P.Named[], o: Opts): Pr
 const many = (fn: (bytes: Uint8Array, o: Opts) => Promise<P.Named[]>) => async ([f]: P.Named[], o: Opts) => fn(f.bytes, o);
 
 // Workflow steps are the tools themselves: multi-PDF tools combine every current file,
-// single-PDF tools run on each file. Excluded: camera input, custom editor, non-PDF output.
-const NOT_STEPS = ['scan', 'workflow', 'organize', 'zip'];
+// single-PDF tools run on each file. Excluded: camera input, custom editor, non-PDF output, and password (no step can
+// read the PDF after it).
+const NOT_STEPS = ['scan', 'workflow', 'organize', 'redact', 'zip', 'password'];
 export const stepTools = () => TOOLS.filter((t) => !NOT_STEPS.includes(t.id));
 
 async function runWorkflow(files: P.Named[], steps: WorkflowStep[]): Promise<Output[]> {
@@ -113,7 +115,7 @@ export const TOOLS: Tool[] = [
     title: 'Compress PDF',
     desc: 'Reduce PDF file size by up to 70% while maintaining quality.',
     opts: [O.quality],
-    run: one('compressed', P.compress),
+    run: one('compressed', (b, o) => P.compress(b, o, recompressJpeg)), // JPEGs re-encoded natively, off the JS thread
   },
   {
     id: 'split', section: 1, input: 'pdf', cta: 'Split PDF', doing: 'Splitting',
@@ -209,6 +211,28 @@ export const TOOLS: Tool[] = [
     desc: 'Number every page at the bottom, left, center or right.',
     opts: [O.numPos, O.numFmt],
     run: one('numbered', P.pageNumbers),
+  },
+  {
+    id: 'redact', section: 3, input: 'pdf', cta: 'Redact PDF', doing: 'Blacking out',
+    title: 'Redact PDF',
+    desc: 'Black out names, numbers or anything private for good, so it can’t be copied, searched or uncovered.',
+    run: async ([f], { boxes = {} }) => {
+      if (!Object.keys(boxes).length) throw new Error('Drag across at least one area to black it out.');
+      return [{ name: 'redacted', bytes: await redactPdf(f.bytes, boxes) }];
+    },
+  },
+  {
+    id: 'password', section: 3, input: 'pdf', noPreview: true, cta: 'Set password', doing: 'Encrypting',
+    title: 'Set Password',
+    desc: 'Lock a PDF so it asks for a password before it opens.',
+    // visible-password: Android keyboard with no auto-capitals or suggestions, and the text stays readable to avoid typos
+    opts: [text('password', 'Password', '', 'Type a password', 'visible-password')],
+    run: one('protected', async (bytes, { password = '' }) => {
+      if (!password) throw new Error('Enter a password.');
+      const out = await setPdfPassword(bytes, password);
+      if (!out) throw new Error('This PDF already has a password.');
+      return out;
+    }),
   },
 ];
 

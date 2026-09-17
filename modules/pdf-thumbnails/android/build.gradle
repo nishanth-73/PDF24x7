@@ -13,3 +13,8 @@ android {
     versionName '1.0.0'
   }
 }
+
+dependencies {
+  // PDF encryption and text extraction, which Android's PdfRenderer can't do (Apache PDFBox 2.0.27 ported to Android).
+  implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+}

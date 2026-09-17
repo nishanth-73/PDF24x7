@@ -4,7 +4,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { SECTIONS, TOOLS, type Tool } from '../../src/tools';
 import { listAllFiles, openFile, share, type Saved } from '../../src/storage';
 import { ArtTile, DocGlyph, ToolArt, kindOf } from '../../src/art';
-import { Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize } from '../../src/ui';
+import { Group, GroupLabel, Icon, IconBtn, LargeTitle, Row, Screen, fmtDate, fmtSize, stem } from '../../src/ui';
 import { fonts, makeStyles, radius, typo, useTheme } from '../../src/theme';
 import { readBackup } from '../../src/backup';
 
@@ -81,7 +81,7 @@ export default function Home() {
           <Group>
             {recent.map((f, i) => (
               <Row
-                key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
+                key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={stem(f.name)} marquee
                 subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
               >
                 <IconBtn name="share-variant-outline" size={18} color={c.sub} onPress={() => share(f)} />
@@ -98,7 +98,7 @@ export default function Home() {
           <Group>
             {fileResults.slice(0, 5).map((f, i) => (
               <Row
-                key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={f.name}
+                key={f.uri} first={i === 0} lead={<DocGlyph kind={kindOf(f.name)} />} title={stem(f.name)} marquee
                 subtitle={`${fmtSize(f.size)} · ${fmtDate(f.modified)}`} onPress={() => openFile(f)}
               >
                 <IconBtn name="share-variant-outline" size={18} color={c.sub} onPress={() => share(f)} />
