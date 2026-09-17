@@ -49,6 +49,7 @@ assert.deepEqual(rot.getPages().map((p) => p.getRotation().angle), [0, 90, 0, 0,
 assert.equal(await count(await P.flip(src, { axis: 'both' })), 6);
 assert.equal(await count(await P.nUp(src, { perSheet: '4' })), 2);
 assert.equal(await count(await P.nUp(src, { perSheet: '16' })), 1);
+assert.equal(await count(await P.nUp(src, { perSheet: '4', lines: true })), 2);
 assert.equal(await count(await P.cropResize(src, { mode: 'crop', margin: 10 })), 6);
 const resized = await PDFDocument.load(await P.cropResize(src, { mode: 'resize', size: 'Letter' }));
 assert.deepEqual(resized.getPage(0).getSize(), { width: 612, height: 792 });

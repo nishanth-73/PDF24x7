@@ -1,5 +1,5 @@
 // One screen body for every tool: pick input -> set options -> run -> share results.
-import { memo, useCallback, useEffect, useState, type ComponentType } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -14,6 +14,7 @@ import {
 } from './ui';
 import { AppFilesPickerModal, type PickedFile } from './AppFilesPickerModal';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
+import { getToolDraft, setToolDraft } from './toolDraft';
 
 type Picked = PickedFile;
 type Result = Saved & { bytes: Uint8Array };
@@ -26,11 +27,12 @@ const PREVIEW_H = 320; // watermark preview max height
 
 const EDITORS: Record<string, ComponentType<EditorProps>> = { organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor };
 
-export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () => void }) {
+export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBack?: () => void; resume?: boolean }) {
   const s = useStyles();
   const { c } = useTheme();
-  const [files, setFiles] = useState<Picked[]>([]);
-  const [opts, setOpts] = useState<Opts>(() => defaults(tool.opts));
+  const [draft] = useState(() => { const d = getToolDraft(); return resume && d?.tool === tool.id ? d : null; });
+  const [files, setFiles] = useState<Picked[]>(() => draft?.files ?? []);
+  const [opts, setOpts] = useState<Opts>(() => draft?.opts ?? defaults(tool.opts));
   const [busy, setBusy] = useState<'' | 'run' | 'preview'>('');
   const [error, setError] = useState('');
   const [results, setResults] = useState<Result[]>([]);
@@ -38,6 +40,14 @@ export default function ToolRunner({ tool, onBack }: { tool: Tool; onBack?: () =
   const Editor = EDITORS[tool.id];
   const multi = tool.input === 'pdfs';
   const ready = files.length >= (multi ? tool.min ?? 2 : 1);
+
+  // Autosave while there's unfinished work, kept after going back or closing the app; finishing or clearing the files drops it.
+  // Only touches the saved draft once this screen has work of its own, so peeking at a tool keeps an older draft.
+  const owns = useRef(!!draft);
+  useEffect(() => {
+    if (files.length && !results.length) { owns.current = true; setToolDraft({ tool: tool.id, files, opts }); }
+    else if (owns.current) setToolDraft(null);
+  }, [files, opts, results]);
 
   const changeFiles = (next: Picked[]) => { setFiles(next); setResults([]); setError(''); };
   const move = (from: number, to: number) => changeFiles(swap(files, from, to));
@@ -243,7 +253,7 @@ const OrganizeTile = memo(function OrganizeTile({
 
   return (
     <View style={s.pageCell}>
-      <View style={s.pageArea}>
+      <View style={[s.pageArea, o.del && s.pageDeleted]}>
         {cell > 0 && (
           <View style={[s.pageBox, box]}>
             {t ? (
@@ -265,8 +275,12 @@ const OrganizeTile = memo(function OrganizeTile({
         {o.rot > 0 && <Text style={s.pageRot}>{o.rot}°</Text>}
       </View>
       <View style={s.pageTools}>
-        <IconBtn name="rotate-right" onPress={() => onRotate(k)} />
-        <IconBtn name="delete-outline" onPress={() => onDelete(k)} />
+        {o.del
+          ? <IconBtn name="restore" onPress={() => onDelete(k)} />
+          : <>
+              <IconBtn name="rotate-right" onPress={() => onRotate(k)} />
+              <IconBtn name="delete-outline" onPress={() => onDelete(k)} />
+            </>}
       </View>
     </View>
   );
@@ -279,6 +293,7 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   const [thumbs, setThumbs] = useState<Thumb[] | null>(null);
   const [cell, setCell] = useState(0);
   const order: PageOrder[] = value.order ?? [];
+  const restored = useRef(order.length > 0); // a resumed draft's order survives the first page load
   const set = (o: PageOrder[]) => onChange({ order: o });
   const move = (from: number, to: number) => set(swap(order, from, to));
   const reset = (info: PageInfo[]) => set(info.map((_, i) => ({ i, rot: 0 })));
@@ -288,7 +303,7 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   }, [order]);
 
   const handleDelete = useCallback((k: number) => {
-    set(order.filter((_, j) => j !== k));
+    set(order.map((x, j) => (j === k ? { ...x, del: !x.del } : x))); // toggles, so a deleted page can be restored
   }, [order]);
 
   useEffect(() => {
@@ -297,7 +312,12 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
     setPages(null);
     setThumbs(null);
     readPicked(file.uri).then(pageInfo)
-      .then((info) => { if (live) { setPages(info); reset(info); } })
+      .then((info) => {
+        if (!live) return;
+        setPages(info);
+        if (restored.current) restored.current = false;
+        else reset(info);
+      })
       .catch((e: Error) => live && onError(e.message));
     // Render lightweight 200px thumbnails for smooth, low-memory drag reordering
     renderThumbnails(file.uri, 200).then((t) => live && setThumbs(t)).catch(() => {});
@@ -310,7 +330,7 @@ function OrganizeEditor({ file, value, onChange, onError }: EditorProps) {
   return (
     <>
       <View style={s.orgBar}>
-        <Text style={s.hint}>Keeping {order.length} of {plural(pages.length, 'page')}. Hold a page to drag it.</Text>
+        <Text style={[s.hint, s.orgHint]}>Keeping {order.filter((o) => !o.del).length} of {plural(pages.length, 'page')}. Hold a page to drag it.</Text>
         <Text style={s.link} onPress={() => reset(pages)}>Reset</Text>
       </View>
       <View onLayout={(e) => setCell(Math.floor((e.nativeEvent.layout.width - GAP) / 2))}>
@@ -487,13 +507,15 @@ const useStyles = makeStyles((c) => ({
   again: { fontFamily: fonts.med, fontSize: 14, color: c.accent, textAlign: 'center', marginTop: 18, paddingVertical: 4 },
   hint: { ...typo.small, color: c.sub },
   link: { fontFamily: fonts.med, fontSize: 13.5, color: c.accent },
-  orgBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  orgBar: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
+  orgHint: { flex: 1 }, // wraps so Reset stays on screen
   pageCell: { padding: 8, borderRadius: radius.control, backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
   pageArea: { height: AREA_H, alignItems: 'center', justifyContent: 'center', backgroundColor: c.sunken, borderRadius: 8, overflow: 'hidden' },
   pageBox: {
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: c.page,
     borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
   },
+  pageDeleted: { opacity: 0.3 },
   pageNum: { fontFamily: fonts.bold, fontSize: 20, color: c.faint },
   pageBadge: {
     position: 'absolute', left: 6, bottom: 6, minWidth: 22, textAlign: 'center', paddingHorizontal: 6, paddingVertical: 1,

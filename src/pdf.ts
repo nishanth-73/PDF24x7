@@ -9,7 +9,7 @@ import jpeg from 'jpeg-js';
 
 export type Named = { name: string; bytes: Uint8Array };
 export type PageInfo = { width: number; height: number; rot: number };
-export type PageOrder = { i: number; rot: number };
+export type PageOrder = { i: number; rot: number; del?: boolean }; // del: greyed out in the editor, left out of the output
 type Num = number | string;
 type Box = [x: number, y: number, w: number, h: number];
 
@@ -308,7 +308,7 @@ export async function flip(bytes: Uint8Array, { axis = 'h' }: { axis?: string } 
 }
 
 const GRID: Record<string, [cols: number, rows: number]> = { 2: [2, 1], 4: [2, 2], 6: [2, 3], 9: [3, 3], 16: [4, 4] };
-export async function nUp(bytes: Uint8Array, { perSheet = 4 }: { perSheet?: Num } = {}) {
+export async function nUp(bytes: Uint8Array, { perSheet = 4, lines = false }: { perSheet?: Num; lines?: boolean } = {}) {
   const grid = GRID[String(perSheet)];
   if (!grid) throw new Error('Choose 2, 4, 6, 9 or 16 pages per sheet.');
   const [cols, rows] = grid;
@@ -321,6 +321,11 @@ export async function nUp(bytes: Uint8Array, { perSheet = 4 }: { perSheet?: Num 
   (await out.embedPages(src.getPages())).forEach((e, i) => {
     const k = i % (cols * rows);
     const sheet = k === 0 ? out.addPage([W, H]) : out.getPage(out.getPageCount() - 1);
+    if (k === 0 && lines) { // hairline dividers in the gaps between cells
+      const line = { thickness: 0.5, color: rgb(0.6, 0.6, 0.6) };
+      for (let c = 1; c < cols; c++) sheet.drawLine({ start: { x: m + c * cw, y: m }, end: { x: m + c * cw, y: H - m }, ...line });
+      for (let r = 1; r < rows; r++) sheet.drawLine({ start: { x: m, y: H - m - r * ch }, end: { x: W - m, y: H - m - r * ch }, ...line });
+    }
     const s = Math.min((cw - 8) / e.width, (ch - 8) / e.height);
     const col = k % cols;
     const row = Math.floor(k / cols);
@@ -397,7 +402,8 @@ export async function pageNumbers(bytes: Uint8Array, { position = 'center', form
   return doc.save();
 }
 
-export async function organize(bytes: Uint8Array, order: PageOrder[]) {
+export async function organize(bytes: Uint8Array, all: PageOrder[]) {
+  const order = all.filter((o) => !o.del);
   if (!order.length) throw new Error('Keep at least one page.');
   const src = await load(bytes);
   const out = await PDFDocument.create();

@@ -1,7 +1,8 @@
 // Outputs live in the app's documents folder so they survive restarts (cache can be purged by the OS).
 import { Directory, File, Paths } from 'expo-file-system';
+import { getContentUriAsync } from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { router } from 'expo-router';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { syncSoon } from './backup';
 
 export type Saved = { name: string; uri: string; size: number; modified: number };
@@ -212,9 +213,21 @@ export function saveTemp(name: string, bytes: Uint8Array) {
   return { name, uri: f.uri };
 }
 
-// Tap-to-open: PDFs go to the in-app viewer; ZIPs can't be viewed, so they go to the share sheet.
-export const openFile = (f: { name: string; uri: string }) =>
-  f.name.toLowerCase().endsWith('.zip') ? share(f) : router.push({ pathname: '/view', params: { uri: f.uri, name: f.name } });
+// Tap-to-open: hand the PDF to whichever app the phone uses for PDFs. The file lives in this app's private storage, so
+// it goes out as a content:// uri with read permission. ZIPs (and phones with no PDF app) fall back to the share sheet.
+export async function openFile(f: { name: string; uri: string }) {
+  if (f.name.toLowerCase().endsWith('.zip')) return share(f);
+  try {
+    const contentUri = await getContentUriAsync(f.uri);
+    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      data: contentUri,
+      type: 'application/pdf',
+      flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+    });
+  } catch {
+    await share(f); // no app can open PDFs, or the user has no default: let them pick
+  }
+}
 
 export const share = (f: { name: string; uri: string }) =>
   Sharing.shareAsync(f.uri, f.name.toLowerCase().endsWith('.zip')

@@ -176,7 +176,7 @@ export const TOOLS: Tool[] = [
     id: 'nup', section: 2, input: 'pdf', cta: 'Arrange on sheets', doing: 'Laying out sheets',
     title: 'Multiple Pages Per Sheet',
     desc: 'Place 2, 4, 6, 9 or 16 PDF pages on a single sheet to save paper.',
-    opts: [O.perSheet],
+    opts: [O.perSheet, { key: 'lines', label: 'Thin lines between pages', type: 'toggle', def: false }],
     run: one('n-up', P.nUp),
   },
   {

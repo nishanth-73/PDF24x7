@@ -69,9 +69,16 @@ export default function Scanner() {
     }));
   }, [doc]);
 
+  const left = useRef(false); // repeated taps (close, dialog buttons) must pop the scanner only once
+  const back = () => {
+    if (left.current) return;
+    left.current = true;
+    router.back();
+  };
+
   const leave = () => {
     if (isDirty(doc) && (doc.pages.length || doc.saved)) setAsking(true);
-    else router.back();
+    else back();
   };
 
   useEffect(() => {
@@ -96,7 +103,7 @@ export default function Scanner() {
     try {
       const saved = await exportPdf(doc);
       setDoc(saved);
-      router.back();
+      back();
       openFile(saved.pdf!);
     } catch (e) {
       Alert.alert('Couldn’t save the PDF', e instanceof Error ? e.message : String(e));
@@ -140,11 +147,11 @@ export default function Scanner() {
           />}
           <Button
             icon="content-save-outline" label="Keep as draft" variant="secondary"
-            onPress={() => { saveDoc(doc); setAsking(false); router.back(); }}
+            onPress={() => { saveDoc(doc); setAsking(false); back(); }}
           />
           <Button
             icon="delete-outline" label={doc.saved ? 'Discard changes' : 'Discard scan'} variant="danger"
-            onPress={() => { discardChanges(doc); setAsking(false); router.back(); }}
+            onPress={() => { discardChanges(doc); setAsking(false); back(); }}
           />
           <Text style={{ fontFamily: fonts.sans, fontSize: 12.5, color: c.sub, textAlign: 'center' }}>
             Drafts stay in Scan → Recent scans, even after closing the app.
