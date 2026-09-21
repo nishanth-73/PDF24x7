@@ -3,11 +3,11 @@ import { memo, useCallback, useEffect, useRef, useState, type ComponentType, typ
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import { pageInfo, watermarkLayout, zip, type PageInfo, type PageOrder } from './pdf';
+import { watermarkLayout, zip, type PageInfo, type PageOrder } from './pdf';
 import { defaults, stepTools, toolById, type Opts, type Output, type Tool, type WorkflowStep } from './tools';
 import { openFile, readPicked, save, saveTemp, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, kindOf } from './art';
-import { pageSizes, renderThumbnails, unlockPdf, type Thumb } from '../modules/pdf-thumbnails';
+import { pageRotations, pageSizes, renderThumbnails, unlockPdf, type Thumb } from '../modules/pdf-thumbnails';
 import {
   Button, DialogModal, DragHandle, PromptModal, Group, GroupLabel, Icon, IconBtn, Options, Reorderable, Row, StepHead,
   fmtSize, moveActions, plural, stem, swap,
@@ -443,9 +443,15 @@ function WatermarkEditor({ file, value, onChange, onError }: EditorProps) {
     setPage(null);
     if (!file) return;
     let live = true;
-    // ponytail: pageInfo still parses the whole PDF in JS for page 1's /Rotate, which the native renderer can't report.
-    Promise.all([readPicked(file.uri).then(pageInfo), renderThumbnails(file.uri, 480, 1)])
-      .then(([info, thumbs]) => { if (live && info[0] && thumbs[0]) setPage({ info: info[0], thumb: thumbs[0] }); })
+    // ponytail: pageSizes reports the crop box, watermark() draws on the media box; they differ only on unusual PDFs,
+    // where the preview is then slightly off scale.
+    Promise.all([pageSizes(file.uri), pageRotations(file.uri), renderThumbnails(file.uri, 480, 1)])
+      .then(([sizes, rots, thumbs]) => {
+        if (!live || !sizes[0] || !thumbs[0]) return;
+        const rot = rots[0] ?? 0;
+        const { width, height } = sizes[0]; // as displayed; watermarkLayout wants the page as the PDF stores it
+        setPage({ info: rot % 180 ? { width: height, height: width, rot } : { width, height, rot }, thumb: thumbs[0] });
+      })
       .catch((e: Error) => live && onError(e.message));
     return () => { live = false; };
   }, [file?.uri]);

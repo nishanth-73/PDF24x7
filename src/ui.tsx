@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View,
   type AccessibilityActionEvent, type KeyboardTypeOptions, type StyleProp, type TextStyle, type ViewStyle,
@@ -253,12 +253,14 @@ export function Chip({ label, active, onPress }: { label: string; active?: boole
 export function DialogModal({
   visible,
   onClose,
+  onShow,
   title,
   subtitle,
   children,
 }: {
   visible: boolean;
   onClose: () => void;
+  onShow?: () => void;
   title: string;
   subtitle?: string;
   children: ReactNode;
@@ -266,7 +268,7 @@ export function DialogModal({
   const s = useStyles();
   const { c } = useTheme();
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} onShow={onShow}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalBackdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={s.modalCard}>
@@ -386,6 +388,7 @@ export function PromptModal({
   const s = useStyles();
   const { c, scheme } = useTheme();
   const [val, setVal] = useState(initialValue);
+  const input = useRef<TextInput>(null);
 
   useEffect(() => {
     if (visible) setVal(initialValue);
@@ -399,9 +402,15 @@ export function PromptModal({
   };
 
   return (
-    <DialogModal visible={visible} onClose={onClose} title={title} subtitle={subtitle}>
+    // Android opens the modal's window with FLAG_NOT_FOCUSABLE and only clears it after Dialog.show() — which is what
+    // fires onShow. So autoFocus, and onShow itself, both ask a window that cannot raise the keyboard yet; focusing
+    // has to wait for the window manager to apply the cleared flag, a frame or two later.
+    <DialogModal
+      visible={visible} onClose={onClose} title={title} subtitle={subtitle}
+      onShow={() => setTimeout(() => input.current?.focus(), 120)}
+    >
       <TextInput
-        autoFocus
+        ref={input}
         selectTextOnFocus // the suggested name is selected, so typing replaces it and tapping keeps it for editing
         keyboardType={keyboardType}
         value={val}

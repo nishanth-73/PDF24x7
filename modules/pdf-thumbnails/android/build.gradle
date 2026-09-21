@@ -17,4 +17,7 @@ android {
 dependencies {
   // PDF encryption and text extraction, which Android's PdfRenderer can't do (Apache PDFBox 2.0.27 ported to Android).
   implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+  // On-device OCR for scanned pages. The bundled Latin model (~4 MB) ships in the APK, so it works offline on first
+  // run; the play-services variant is smaller but downloads the model and needs Play Services.
+  implementation 'com.google.mlkit:text-recognition:16.0.1'
 }

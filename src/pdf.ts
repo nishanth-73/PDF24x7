@@ -1,10 +1,9 @@
 // Every operation runs on-device with pure-JS libs: bytes in, bytes out.
 import {
   PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFStream, PDFString,
-  ParseSpeeds, StandardFontEmbedder, StandardFonts, clip, decodePDFRawStream, degrees, endPath, popGraphicsState, pushGraphicsState,
-  rectangle, rgb,
+  ParseSpeeds, StandardFontEmbedder, StandardFonts, decodePDFRawStream, degrees, rgb,
 } from 'pdf-lib';
-import type { PDFImage, PDFObject, PDFPage } from 'pdf-lib';
+import type { PDFObject, PDFPage } from 'pdf-lib';
 import { zipSync } from 'fflate';
 
 export type Named = { name: string; bytes: Uint8Array };
@@ -414,7 +413,6 @@ export type PageSize = 'fit' | `${PaperSize}-${'portrait' | 'landscape'}`;
 export type Crop = { x: number; y: number; w: number; h: number }; // fractions of the image, y from the top
 export type Placed = { img: number; crop: Crop; x: number; y: number; w: number; h: number }; // points, y from the bottom
 export type Sheet = { W: number; H: number; items: Placed[] };
-export type ScanPdfPage = { kind: PageKind; size: PageSize; images: Uint8Array[] };
 type Dim = { width: number; height: number };
 
 const FULL: Crop = { x: 0, y: 0, w: 1, h: 1 };
@@ -448,28 +446,6 @@ export function layoutScanPage(kind: PageKind, size: PageSize, imgs: Dim[]): She
     return [{ W, H, items }];
   }
   return [single(FULL, first.width, first.height)];
-}
-
-// Draws only the `crop` part of an image into the box (x, y, w, h), clipping the rest.
-function drawCropped(page: PDFPage, img: PDFImage, crop: Crop, x: number, y: number, w: number, h: number) {
-  const sw = w / crop.w;
-  const sh = h / crop.h;
-  page.pushOperators(pushGraphicsState(), rectangle(x, y, w, h), clip(), endPath());
-  page.drawImage(img, { x: x - crop.x * sw, y: y - (1 - crop.y - crop.h) * sh, width: sw, height: sh });
-  page.pushOperators(popGraphicsState());
-}
-
-export async function imagesToPdf(pages: ScanPdfPage[]) {
-  if (!pages.length) throw new Error('At least one image is required to create a PDF.');
-  const doc = await PDFDocument.create();
-  for (const { kind, size, images } of pages) {
-    const embedded = await Promise.all(images.map((b) => (b[0] === 0x89 ? doc.embedPng(b) : doc.embedJpg(b))));
-    for (const sheet of layoutScanPage(kind, size, embedded)) {
-      const page = doc.addPage([sheet.W, sheet.H]);
-      for (const it of sheet.items) drawCropped(page, embedded[it.img], it.crop, it.x, it.y, it.w, it.h);
-    }
-  }
-  return save(doc);
 }
 
 export function zip(files: Named[]): Uint8Array {

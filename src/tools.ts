@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import type { KeyboardTypeOptions } from 'react-native';
 import type { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as P from './pdf';
-import { recompressJpeg, redactPdf, setPdfPassword } from '../modules/pdf-thumbnails';
+import { ocrPdf, recompressJpeg, redactPdf, setPdfPassword } from '../modules/pdf-thumbnails';
 
 export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 // Option values come straight from the UI: strings, or booleans for toggles.
@@ -220,6 +220,16 @@ export const TOOLS: Tool[] = [
       if (!Object.keys(boxes).length) throw new Error('Drag across at least one area to black it out.');
       return [{ name: 'redacted', bytes: await redactPdf(f.bytes, boxes) }];
     },
+  },
+  {
+    id: 'ocr', section: 3, input: 'pdf', cta: 'Make searchable', doing: 'Reading every page',
+    title: 'OCR Scanned PDF',
+    desc: 'Read the text in a scanned PDF and lay it invisibly over the pages, so it can be searched, selected and copied. Runs on your phone.',
+    run: one('searchable', async (bytes) => {
+      const out = await ocrPdf(bytes);
+      if (!out) throw new Error('No text found. This PDF may already be searchable, or be too blurry to read.');
+      return out;
+    }),
   },
   {
     id: 'password', section: 3, input: 'pdf', noPreview: true, cta: 'Set password', doing: 'Encrypting',

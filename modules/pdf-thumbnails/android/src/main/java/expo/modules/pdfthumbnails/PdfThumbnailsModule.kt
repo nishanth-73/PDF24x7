@@ -5,20 +5,30 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.encryption.AccessPermission
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.util.Matrix
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -29,6 +39,8 @@ import java.io.FileOutputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.zip.Deflater
 import java.util.zip.ZipEntry
@@ -71,6 +83,50 @@ private fun PdfRenderer.Page.writeJpeg(width: Int, quality: Int, sink: OutputStr
   render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
   bitmap.compress(Bitmap.CompressFormat.JPEG, quality, sink)
   bitmap.recycle()
+}
+
+// The invisible text layer is written in Helvetica, which only encodes WinAnsi, so the handful of exotic glyphs OCR
+// produces are folded to their plain equivalents or dropped rather than failing the page.
+private fun winAnsi(s: String) = s
+  .map {
+    when (it) {
+      '‘', '’' -> '\''
+      '“', '”' -> '"'
+      '–', '—' -> '-'
+      else -> it
+    }
+  }
+  .filter { it.code in 32..126 || it.code in 160..255 }
+  .joinToString("")
+  .trim()
+
+// Maps the page as displayed (origin bottom-left, /Rotate applied) onto the page as stored, so recognised boxes can be
+// placed in the same coordinates PdfRenderer drew them in.
+private fun displayMatrix(box: PDRectangle, rot: Int): Matrix {
+  val (x, y) = box.lowerLeftX to box.lowerLeftY
+  return when (rot) {
+    90 -> Matrix(0f, 1f, -1f, 0f, x + box.width, y)
+    180 -> Matrix(-1f, 0f, 0f, -1f, x + box.width, y + box.height)
+    270 -> Matrix(0f, -1f, 1f, 0f, x, y + box.height)
+    else -> Matrix(1f, 0f, 0f, 1f, x, y)
+  }
+}
+
+// JPEG bytes go into the PDF exactly as they sit on disk: no decode, no re-encode, no pixels in memory. Every rendered
+// scan page is a JPEG; anything else (a PNG picked from the gallery whose render failed) is decoded once instead.
+private fun embed(doc: PDDocument, uri: String): PDImageXObject {
+  val file = File(Uri.parse(uri).path ?: uri)
+  val head = ByteArray(2)
+  file.inputStream().use { it.read(head) }
+  if (head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte()) {
+    return file.inputStream().use { JPEGFactory.createFromStream(doc, it) }
+  }
+  val bitmap = BitmapFactory.decodeFile(file.path) ?: throw IllegalArgumentException("Could not read ${file.name}")
+  try {
+    return JPEGFactory.createFromImage(doc, bitmap, 0.92f)
+  } finally {
+    bitmap.recycle()
+  }
 }
 
 // PDF work that is too slow for the JS thread or beyond pdf-lib: thumbnails, page sizes, JPEG re-encoding (Android's
@@ -320,6 +376,133 @@ class PdfThumbnailsModule : Module() {
           renderer.openPage(i).use { mapOf("width" to it.width, "height" to it.height) }
         }
       }
+    }
+
+    // Makes a scanned PDF searchable: every page that has no real text is rendered, read by ML Kit, and given an
+    // invisible text layer sitting on top of the words in the picture, so find, select and copy work while the page
+    // still looks exactly the same. Pages that already carry text are left untouched. Null when nothing was read.
+    AsyncFunction("ocr") { bytes: ByteArray ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      val tmp = File(context.cacheDir, "ocr-${System.currentTimeMillis()}.pdf").apply { writeBytes(bytes) } // PdfRenderer needs a file
+      val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+      try {
+        PDDocument.load(tmp).use { doc ->
+          val stripper = PDFTextStripper()
+          var added = 0
+          PdfRenderer(ParcelFileDescriptor.open(tmp, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+            for (i in 0 until minOf(doc.numberOfPages, renderer.pageCount)) {
+              stripper.startPage = i + 1
+              stripper.endPage = i + 1
+              if (stripper.getText(doc).trim().length >= 50) continue // already searchable
+
+              // Boxes come back as fractions of the page, so the render resolution never reaches the text layer.
+              val lines = renderer.openPage(i).use { p ->
+                val bw = minOf(p.width * 3, 3000) // ~216 dpi: enough for ML Kit to read small print
+                val bh = (p.height * bw.toFloat() / p.width).toInt().coerceAtLeast(1)
+                val bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+                bitmap.eraseColor(Color.WHITE)
+                p.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                try {
+                  Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)), 120, TimeUnit.SECONDS)
+                    .textBlocks.flatMap { block -> block.lines }
+                    .mapNotNull { line ->
+                      val r = line.boundingBox ?: return@mapNotNull null
+                      val text = winAnsi(line.text)
+                      // getStringWidth rejects anything Helvetica can't write, so a bad line is dropped here rather
+                      // than part-way through the content stream.
+                      val width = try { PDType1Font.HELVETICA.getStringWidth(text) } catch (_: Exception) { 0f }
+                      if (text.isEmpty() || width <= 0f || r.width() <= 0 || r.height() <= 0) null
+                      else Triple(text, RectF(r.left / bw.toFloat(), r.top / bh.toFloat(), r.right / bw.toFloat(), r.bottom / bh.toFloat()), width)
+                    }
+                } finally {
+                  bitmap.recycle()
+                }
+              }
+              if (lines.isEmpty()) continue
+
+              val page = doc.getPage(i)
+              val rot = ((page.rotation % 360) + 360) % 360
+              val box = page.cropBox
+              val pw = if (rot % 180 == 0) box.width else box.height
+              val ph = if (rot % 180 == 0) box.height else box.width
+              PDPageContentStream(doc, page, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                cs.transform(displayMatrix(box, rot))
+                cs.beginText()
+                cs.setRenderingMode(RenderingMode.NEITHER) // there for search and selection only, never drawn
+                for ((text, r, width) in lines) {
+                  val size = ((r.bottom - r.top) * ph).coerceAtLeast(1f)
+                  cs.setFont(PDType1Font.HELVETICA, size)
+                  // Stretch the line to the width of the words underneath, so a selection lands on them.
+                  cs.setHorizontalScaling((r.right - r.left) * pw / (width / 1000f * size) * 100f)
+                  cs.setTextMatrix(Matrix.getTranslateInstance(r.left * pw, ph - r.bottom * ph))
+                  cs.showText(text)
+                  added++
+                }
+                cs.endText()
+              }
+            }
+          }
+          if (added == 0) null
+          else ByteArrayOutputStream(bytes.size).use { out -> doc.save(out); out.toByteArray() }
+        }
+      } finally {
+        recognizer.close()
+        tmp.delete()
+      }
+    }
+
+    // Each page's /Rotate in degrees. pageSizes reports sizes with that rotation already applied; this is for callers
+    // that need to undo it and work on the page as the PDF stores it, like the watermark preview.
+    AsyncFunction("pageRotations") { uri: String ->
+      PDDocument.load(File(Uri.parse(uri).path ?: uri)).use { doc ->
+        doc.pages.map { ((it.rotation % 360) + 360) % 360 }
+      }
+    }
+
+    // A scan's PDF, built from the page images already on disk and streamed straight to a cache file, so neither the
+    // photos nor the finished PDF ever cross into JS. `sheetsJson` is layoutScanPage's output: page boxes in points,
+    // each item an index into `images`, a crop in image fractions, and where to place it (y from the bottom).
+    AsyncFunction("buildScanPdf") { sheetsJson: String, images: List<String> ->
+      val context = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+      val sheets = JSONArray(sheetsJson)
+      val out = File(context.cacheDir, "scan-${System.currentTimeMillis()}.pdf")
+      PDDocument().use { doc ->
+        val embedded = arrayOfNulls<PDImageXObject>(images.size) // a book's two halves share one embedded image
+        for (s in 0 until sheets.length()) {
+          val sheet = sheets.getJSONObject(s)
+          val page = PDPage(PDRectangle(sheet.getDouble("W").toFloat(), sheet.getDouble("H").toFloat()))
+          doc.addPage(page)
+          val items = sheet.getJSONArray("items")
+          PDPageContentStream(doc, page).use { cs ->
+            for (i in 0 until items.length()) {
+              val item = items.getJSONObject(i)
+              val n = item.getInt("img")
+              val image = embedded[n] ?: embed(doc, images[n]).also { embedded[n] = it }
+              val crop = item.getJSONObject("crop")
+              val x = item.getDouble("x").toFloat()
+              val y = item.getDouble("y").toFloat()
+              val w = item.getDouble("w").toFloat()
+              val h = item.getDouble("h").toFloat()
+              // The box shows only `crop` of the image, so draw the whole image scaled up and clip away the rest.
+              val fullW = (w / crop.getDouble("w")).toFloat()
+              val fullH = (h / crop.getDouble("h")).toFloat()
+              cs.saveGraphicsState()
+              cs.addRect(x, y, w, h)
+              cs.clip()
+              cs.drawImage(
+                image,
+                x - (crop.getDouble("x") * fullW).toFloat(),
+                y - ((1 - crop.getDouble("y") - crop.getDouble("h")) * fullH).toFloat(),
+                fullW,
+                fullH,
+              )
+              cs.restoreGraphicsState()
+            }
+          }
+        }
+        doc.save(out)
+      }
+      Uri.fromFile(out).toString()
     }
 
     // Re-encodes one JPEG at `quality` (0-100). Null when Android can't decode it (CMYK and other rare flavours).

@@ -186,6 +186,18 @@ const ART: Record<string, (k: Kit) => ReactNode> = {
       <Rect x={20} y={33} width={15} height={4.5} rx={1} fill={k.accent} />
     </>
   ),
+  ocr: (k) => (
+    <>
+      <Page x={9} y={5} w={30} h={38} k={k} lines={0} />
+      <Line x1={13.5} y1={13} x2={34.5} y2={13} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+      <Rect x={12.5} y={18} width={22} height={8} rx={1.5} fill="none" stroke={k.accent} strokeWidth={1.5} />
+      <SvgText x={23.5} y={24} fontSize={5.5} fontFamily={fonts.bold} fill={k.accent} textAnchor="middle">
+        abc
+      </SvgText>
+      <Line x1={13.5} y1={31} x2={34.5} y2={31} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+      <Line x1={13.5} y1={35.5} x2={27} y2={35.5} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+    </>
+  ),
   password: (k) => (
     <>
       <Page x={7} y={5} w={26} h={34} k={k} lines={4} />

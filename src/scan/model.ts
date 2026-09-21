@@ -2,8 +2,9 @@
 // strokes can be redone any time, even after the PDF was saved. Stored under Documents/scans/<id>/.
 import { Directory, File, Paths } from 'expo-file-system';
 import { processImage, type Corners, type Filter, type Photo, type Stroke } from '../../modules/doc-scanner';
-import { imagesToPdf, type PageKind, type PageSize } from '../pdf';
-import { listAllFiles, readPicked, removeFile, save } from '../storage';
+import { buildScanPdf } from '../../modules/pdf-thumbnails';
+import { layoutScanPage, type PageKind, type PageSize } from '../pdf';
+import { adoptTemp, listAllFiles, removeFile } from '../storage';
 import { pad } from '../ui';
 
 export type Shot = {
@@ -133,16 +134,23 @@ export function deleteDoc(id: string) {
 
 // Builds the PDF into Files. Re-saving an edited scan replaces its earlier PDF under the same name.
 export async function exportPdf(doc: ScanDoc): Promise<ScanDoc> {
-  const pages = await Promise.all(doc.pages.map(async (p) => ({
-    kind: p.kind, size: p.size, images: await Promise.all(p.shots.map((s) => readPicked(s.out ?? s.src))),
-  })));
-  const bytes = await imagesToPdf(pages);
+  if (!doc.pages.length) throw new Error('At least one page is required to create a PDF.');
+  // Only the layout goes native; the page images are read straight from disk there, so nothing is copied through JS.
+  const images: string[] = [];
+  const sheets = doc.pages.flatMap((p) => {
+    const first = images.length;
+    images.push(...p.shots.map((sh) => sh.out ?? sh.src));
+    const dims = p.shots.map((sh) => ({ width: sh.outW ?? sh.width, height: sh.outH ?? sh.height }));
+    return layoutScanPage(p.kind, p.size, dims)
+      .map((s) => ({ ...s, items: s.items.map((it) => ({ ...it, img: first + it.img })) }));
+  });
+  const tmp = await buildScanPdf(sheets, images);
   // Replace the earlier PDF wherever it is now (the user may have moved it into a folder in Files).
   const all = doc.pdf ? listAllFiles() : [];
   const old = doc.pdf && (all.find((f) => f.uri === doc.pdf!.uri) ?? all.find((f) => f.name === doc.pdf!.name));
   const folder = old ? new File(old.uri).parentDirectory.uri : undefined;
   if (old) removeFile(old.uri);
-  const file = save(doc.name, 'pdf', bytes, folder);
+  const file = adoptTemp(tmp, doc.name, 'pdf', folder);
   const next = { ...doc, pdf: { uri: file.uri, name: file.name }, saved: { name: doc.name, pages: doc.pages, sig: signature(doc) } };
   saveDoc(next);
   cleanFiles(next);

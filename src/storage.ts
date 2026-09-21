@@ -142,6 +142,15 @@ export function save(base: string, ext: string, bytes: Uint8Array, folderUri?: s
   return { name: f.name, uri: f.uri, size: bytes.length, modified: Date.now(), bytes };
 }
 
+// save() for output a native module already wrote into the cache: the file is moved in under a free name, so its bytes
+// never have to reach JS at all.
+export function adoptTemp(tmpUri: string, base: string, ext: string, folderUri?: string): Saved {
+  const f = freeFile(base, ext, folderUri);
+  new File(tmpUri).moveSync(f);
+  syncSoon(); // no-op unless Google Drive sync is on
+  return { name: f.name, uri: f.uri, size: f.size ?? 0, modified: Date.now() };
+}
+
 // Keeps the extension; a name that's taken gets " (2)" like any save. Returns the file under its new name.
 export function renameFile(f: Saved, newName: string): Saved {
   const dot = f.name.lastIndexOf('.');

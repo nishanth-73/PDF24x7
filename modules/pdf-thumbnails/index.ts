@@ -1,9 +1,13 @@
 import { requireNativeModule } from 'expo';
+import type { Sheet } from '../../src/pdf';
 
 export type Thumb = { uri: string; width: number; height: number };
 type Native = {
   render(uri: string, maxWidth: number, maxPages: number): Promise<Thumb[]>;
   pageSizes(uri: string): Promise<{ width: number; height: number }[]>;
+  pageRotations(uri: string): Promise<number[]>;
+  ocr(bytes: Uint8Array): Promise<Uint8Array | null>;
+  buildScanPdf(sheetsJson: string, images: string[]): Promise<string>;
   recompressJpeg(bytes: Uint8Array, quality: number): Promise<Uint8Array | null>;
   setPassword(bytes: Uint8Array, password: string): Promise<Uint8Array | null>;
   toJpeg(uri: string): Promise<string>;
@@ -21,6 +25,17 @@ export const renderThumbnails = (uri: string, maxWidth = 360, maxPages = 0): Pro
 
 // Page sizes in points as shown on screen (rotation applied), read natively without parsing the PDF in JS.
 export const pageSizes = (uri: string) => native.pageSizes(uri);
+
+// Each page's /Rotate in degrees — the rotation pageSizes has already applied.
+export const pageRotations = (uri: string) => native.pageRotations(uri);
+
+// Reads the pages that have no text and adds an invisible text layer over the words, leaving the pages looking the
+// same. Null when nothing could be read. On-device, no network.
+export const ocrPdf = (bytes: Uint8Array) => native.ocr(bytes);
+
+// Builds a scan's PDF from the page images on disk and returns its uri in the cache. Only the layout crosses the
+// bridge: the images are read, and the PDF written, natively.
+export const buildScanPdf = (sheets: Sheet[], images: string[]) => native.buildScanPdf(JSON.stringify(sheets), images);
 
 // Re-encodes a JPEG off the JS thread; null if Android can't decode it.
 export const recompressJpeg = (bytes: Uint8Array, quality: number) => native.recompressJpeg(bytes, quality);
