@@ -51,7 +51,32 @@ assert.equal(await count(await P.flip(src, { axis: 'both' })), 6);
 assert.equal(await count(await P.nUp(src, { perSheet: '4' })), 2);
 assert.equal(await count(await P.nUp(src, { perSheet: '16' })), 1);
 assert.equal(await count(await P.nUp(src, { perSheet: '4', lines: true })), 2);
-assert.equal(await count(await P.cropResize(src, { mode: 'crop', margin: 10 })), 6);
+// Crop boxes are drawn on the page as displayed (y from the top); pages without one are left whole.
+const keep: [number, number, number, number] = [0.1, 0.2, 0.5, 0.6]; // of a 400x600 page
+const cropBox = (d: PDFDocument, i: number) => Object.values(d.getPage(i).getCropBox()).map(Math.round);
+const cropped = await PDFDocument.load(await P.cropResize(src, { mode: 'crop', boxes: { 0: keep } }));
+assert.equal(cropped.getPageCount(), 6);
+assert.deepEqual(cropBox(cropped, 0), [40, 120, 200, 360]);
+assert.deepEqual(cropBox(cropped, 1), [0, 0, 400, 600]);
+// The same rect on a page the viewer turns 90° has to be turned back before it becomes a crop box.
+const turned = await P.rotate(src, { angle: 90, pages: '1' });
+const cropTurned = await PDFDocument.load(await P.cropResize(turned, { mode: 'crop', boxes: { 0: keep } }));
+assert.deepEqual(cropBox(cropTurned, 0), [80, 60, 240, 300]);
+await assert.rejects(P.cropResize(src, { mode: 'crop' }));
+// Fill & Sign places items on the page as displayed; the origin is the item's own bottom-left corner, which lands on
+// a different corner of the page as /Rotate turns it, and the item's width and height swap at 90 and 270.
+const item: [number, number, number, number] = [0.1, 0.2, 0.5, 0.1];
+const placed = (rot: number) => Object.values(P.placeOnPage(item, rot, 400, 600)).map(Math.round);
+assert.deepEqual(placed(0), [40, 420, 200, 60]);
+assert.deepEqual(placed(90), [120, 60, 300, 40]);
+assert.deepEqual(placed(180), [360, 180, 200, 60]);
+assert.deepEqual(placed(270), [280, 540, 300, 40]);
+const signed = await PDFDocument.load(await P.fillSign(
+  src,
+  [{ page: 0, kind: 'text', x: 0.1, y: 0.1, size: 0.03, text: 'Signed "here" — ok' }, { page: 1, kind: 'image', x: 0.2, y: 0.2, w: 0.3, h: 0.2, uri: 'sig' }],
+  { sig: photo },
+));
+assert.equal(signed.getPageCount(), 6);
 const resized = await PDFDocument.load(await P.cropResize(src, { mode: 'resize', size: 'Letter' }));
 assert.deepEqual(resized.getPage(0).getSize(), { width: 612, height: 792 });
 assert.equal(await count(await P.watermark(src, { text: 'DRAFT', opacity: 0.2 })), 6);

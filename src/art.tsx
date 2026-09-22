@@ -186,6 +186,18 @@ const ART: Record<string, (k: Kit) => ReactNode> = {
       <Rect x={20} y={33} width={15} height={4.5} rx={1} fill={k.accent} />
     </>
   ),
+  fillSign: (k) => (
+    <>
+      <Page x={9} y={5} w={30} h={38} k={k} lines={0} />
+      <Line x1={13.5} y1={13} x2={34.5} y2={13} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+      <Line x1={13.5} y1={18} x2={28} y2={18} stroke={k.line} strokeWidth={1.4} strokeLinecap="round" />
+      <Path
+        d="M14 34C18 28 21 33 24 30C27 27 29 32 34 26" fill="none" stroke={k.accent}
+        strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"
+      />
+      <Line x1={13.5} y1={38} x2={34.5} y2={38} stroke={k.stroke} strokeWidth={1.2} strokeLinecap="round" />
+    </>
+  ),
   ocr: (k) => (
     <>
       <Page x={9} y={5} w={30} h={38} k={k} lines={0} />

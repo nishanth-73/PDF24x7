@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, Switch, Text, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
 import { clearFiles, listAllFiles, type Saved } from '../../src/storage';
 import { Button, ConfirmModal, DialogModal, Group, GroupLabel, Icon, LargeTitle, Row, Screen, fmtDate, fmtSize, plural } from '../../src/ui';
 import { connectAccount, disableBackup, hasDriveCopies, isSyncing, keepInDriveOnly, onBackupChange, readBackup, syncNow } from '../../src/backup';
+import { Consent } from '../../src/Consent';
 import { fonts, makeStyles, palettes, radius, typo, useTheme, type Palette, type ThemePref } from '../../src/theme';
 import type { IconName } from '../../src/tools';
 
@@ -17,6 +18,7 @@ export default function SettingsTab() {
   const [files, setFiles] = useState<Saved[]>(listAllFiles); // loaded before the first render: no "0 files" flash
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showClearChoice, setShowClearChoice] = useState(false); // files are also in Google Drive
+  const [showTerms, setShowTerms] = useState(false);
   const clearAll = (keepDrive: boolean) => {
     if (keepDrive) keepInDriveOnly(files.map((f) => f.uri));
     clearFiles();
@@ -62,7 +64,15 @@ export default function SettingsTab() {
       <Group>
         <Row first lead={lead('information-outline')} title="Version" value={version} />
         <Row lead={lead('code-tags')} title="PDF engine" value="pdf-lib" />
+        <Row
+          lead={lead('shield-check-outline')} title="Privacy Policy & Terms" chevron
+          onPress={() => setShowTerms(true)}
+        />
       </Group>
+
+      <Modal visible={showTerms} animationType="slide" onRequestClose={() => setShowTerms(false)}>
+        <Consent onClose={() => setShowTerms(false)} />
+      </Modal>
 
       <ConfirmModal
         visible={showClearConfirm}

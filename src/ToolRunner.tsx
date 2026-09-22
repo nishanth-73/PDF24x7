@@ -14,6 +14,8 @@ import {
 } from './ui';
 import { AppFilesPickerModal, type PickedFile } from './AppFilesPickerModal';
 import { RedactEditor } from './RedactEditor';
+import { PdfCropEditor } from './PdfCropEditor';
+import { FillSignEditor } from './FillSignEditor';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 import { getToolDraft, setToolDraft } from './toolDraft';
 
@@ -27,9 +29,13 @@ const AREA_H = 180; // organize page preview height
 const PREVIEW_H = 320; // watermark preview max height
 
 const EDITORS: Record<string, ComponentType<EditorProps>> = {
-  organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor, redact: RedactEditor,
+  organize: OrganizeEditor, workflow: WorkflowEditor, watermark: WatermarkEditor, redact: RedactEditor, crop: PdfCropEditor,
+  fillSign: FillSignEditor,
 };
-const EDITOR_TITLES: Record<string, string> = { organize: 'Arrange pages', workflow: 'Add steps', redact: 'Mark what to black out' };
+const EDITOR_TITLES: Record<string, string> = {
+  organize: 'Arrange pages', workflow: 'Add steps', redact: 'Mark what to black out', crop: 'Crop or resize',
+  fillSign: 'Fill in and sign',
+};
 
 export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBack?: () => void; resume?: boolean }) {
   const s = useStyles();
@@ -85,6 +91,7 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
   // Saving asks for a name first, filled in with the usual one ("Report-compressed"). For several outputs (splits) the
   // name is the start of each part's name.
   const [naming, setNaming] = useState<{ outs: Output[]; name: string } | null>(null);
+  const [parts, setParts] = useState<{ name: string; bytes: Uint8Array }[] | null>(null); // a multi-file preview
   const saveAs = (typed: string) => {
     if (!naming) return;
     const name = typed.replace(/\.(pdf|zip)$/i, '');
@@ -103,8 +110,10 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
       const outs = await tool.run(inputs, opts);
       const base = stripPdf(files[0].name);
       const nameOf = (o: { name: string; full?: boolean }) => (o.full ? o.name : o.name ? `${base}-${o.name}` : base);
-      // ponytail: multi-file outputs (splits) preview only the first part; add a picker if people ask for the rest.
-      if (mode === 'preview') openFile(saveTemp(`${nameOf(outs[0])} (preview).pdf`, outs[0].bytes));
+      if (mode === 'preview') {
+        if (outs.length === 1) openFile(saveTemp(`${nameOf(outs[0])} (preview).pdf`, outs[0].bytes));
+        else setParts(outs.map((o) => ({ name: nameOf(o), bytes: o.bytes }))); // several files: pick which one to look at
+      }
       else if (outs.every((o) => o.full)) setResults(outs.map((o) => save(o.name, o.ext ?? 'pdf', o.bytes))); // already named per input file
       else setNaming({ outs, name: outs.length === 1 ? nameOf(outs[0]) : base });
     } catch (e) {
@@ -219,6 +228,23 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
         onUnlock={(uri) => { append([{ ...locked[0], uri }]); setLocked(locked.slice(1)); }}
         onSkip={() => setLocked(locked.slice(1))}
       />
+
+      {/* Preview of a tool that makes several files: one temp file lives at a time, so parts open one at a time. */}
+      <DialogModal
+        visible={!!parts} onClose={() => setParts(null)} title="Preview"
+        subtitle={parts ? `This makes ${plural(parts.length, 'file')}. Tap one to open it.` : undefined}
+      >
+        <View style={{ marginTop: 14 }}>
+          <Group>
+            {(parts ?? []).map((p, i) => (
+              <Row
+                key={p.name + i} first={i === 0} lead={<DocGlyph kind="pdf" />} title={stem(p.name)} subtitle={fmtSize(p.bytes.length)}
+                marquee chevron onPress={() => openFile(saveTemp(`${p.name} (preview).pdf`, p.bytes))}
+              />
+            ))}
+          </Group>
+        </View>
+      </DialogModal>
 
       <PromptModal
         visible={!!naming} title="Save as" placeholder="File name" initialValue={naming?.name} submitLabel="Save" cancelLabel="Discard"

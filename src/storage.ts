@@ -254,10 +254,19 @@ export function clearFiles(): void {
 // Preview outputs live in cache and are replaced each time, so nothing lands in Files until the user runs the tool.
 export function saveTemp(name: string, bytes: Uint8Array) {
   const d = new Directory(Paths.cache, 'preview');
-  if (d.exists) d.delete();
-  d.create({ intermediates: true, idempotent: true });
-  const f = new File(d, `${Date.now()}.pdf`); // fresh path each time so the thumbnail cache never serves a stale render
-  f.create();
+  if (!d.exists) d.create({ intermediates: true, idempotent: true });
+  // Older previews are pruned, not wiped: a tool that makes several files previews them one at a time, and the part
+  // the user is still reading in their PDF app must not be deleted underneath it.
+  try {
+    d.list().filter((x): x is File => x instanceof File)
+      .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0))
+      .slice(6)
+      .forEach((x) => x.delete());
+  } catch {}
+  // The timestamp keeps the path fresh so the thumbnail cache never serves a stale render; the name after it is what
+  // the PDF app shows, so several parts of one preview can be told apart.
+  const f = new File(d, `${Date.now()}-${name.replace(/[\\/:*?"<>|]+/g, '_')}`);
+  f.create({ overwrite: true });
   f.write(bytes);
   return { name, uri: f.uri };
 }

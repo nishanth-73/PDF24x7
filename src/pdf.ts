@@ -3,7 +3,7 @@ import {
   PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFStream, PDFString,
   ParseSpeeds, StandardFontEmbedder, StandardFonts, decodePDFRawStream, degrees, rgb,
 } from 'pdf-lib';
-import type { PDFObject, PDFPage } from 'pdf-lib';
+import type { PDFImage, PDFObject, PDFPage } from 'pdf-lib';
 import { zipSync } from 'fflate';
 
 export type Named = { name: string; bytes: Uint8Array };
@@ -329,17 +329,92 @@ export async function nUp(bytes: Uint8Array, { perSheet = 4, lines = false }: { 
   return save(out);
 }
 
+// What to keep on a page, as fractions of the page as it is displayed, y from the top — the same frame the crop
+// editor draws on. Keyed by page index, so every page can be cropped differently.
+export type CropBoxes = Record<string, Box>;
+
+// The page as displayed is the page as stored turned by /Rotate, so a rect drawn on screen has to be turned back
+// before it can be a crop box (and PDF y runs from the bottom).
+const unrotate = ([x, y, w, h]: Box, rot: number): Box =>
+  rot === 90 ? [y, x, h, w]
+    : rot === 180 ? [1 - x - w, y, w, h]
+      : rot === 270 ? [1 - y - h, 1 - x - w, h, w]
+        : [x, 1 - y - h, w, h];
+
+// Something the user dropped onto a page in Fill & Sign. Positions are fractions of the page as displayed, y from
+// the top, so they mean the same thing as what the editor drew. Text keeps no width: it is as wide as it needs.
+export type SignItem =
+  | { page: number; kind: 'text'; x: number; y: number; size: number; text: string }
+  | { page: number; kind: 'image'; x: number; y: number; w: number; h: number; uri: string };
+
+/**
+ * Where to draw an item placed on the page as displayed: the origin to draw from, the item's natural size, and
+ * (as `rot`) the angle to draw it at so it still reads upright after the viewer turns the page by /Rotate.
+ * The origin is the item's own bottom-left corner, which lands on a different corner of the page as it turns.
+ */
+export function placeOnPage(rect: Box, rot: number, W: number, H: number) {
+  const [fx, fy, fw, fh] = unrotate(rect, rot);
+  const [X, Y, RW, RH] = [fx * W, fy * H, fw * W, fh * H];
+  if (rot === 90) return { x: X + RW, y: Y, w: RH, h: RW };
+  if (rot === 180) return { x: X + RW, y: Y + RH, w: RW, h: RH };
+  if (rot === 270) return { x: X, y: Y + RH, w: RH, h: RW };
+  return { x: X, y: Y, w: RW, h: RH };
+}
+
+// The standard fonts are WinAnsi, so a character they cannot write is folded to its plain form or dropped, rather
+// than failing the whole document.
+const winAnsi = (s: string) => s
+  .replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-')
+  .replace(/[^\x20-\x7E\xA0-\xFF]/g, '');
+
+const DESCENT = 0.79; // Helvetica sits about a fifth of its size below the baseline
+
+export async function fillSign(bytes: Uint8Array, items: SignItem[], images: Record<string, Uint8Array>) {
+  const doc = await load(bytes);
+  const pages = doc.getPages();
+  const embedded: Record<string, PDFImage> = {};
+  let font: Awaited<ReturnType<PDFDocument['embedFont']>> | null = null;
+  for (const it of items) {
+    const p = pages[it.page];
+    if (!p) continue;
+    const rot = ((p.getRotation().angle % 360) + 360) % 360;
+    const { width: W, height: H } = p.getSize();
+    if (it.kind === 'image') {
+      if (!embedded[it.uri]) {
+        const b = images[it.uri];
+        if (!b) continue;
+        embedded[it.uri] = b[0] === 0x89 ? await doc.embedPng(b) : await doc.embedJpg(b);
+      }
+      const at = placeOnPage([it.x, it.y, it.w, it.h], rot, W, H);
+      p.drawImage(embedded[it.uri], { x: at.x, y: at.y, width: at.w, height: at.h, rotate: degrees(rot) });
+      continue;
+    }
+    const text = winAnsi(it.text);
+    if (!text) continue;
+    font ??= await doc.embedFont(StandardFonts.Helvetica);
+    // The box's height is the font size; the baseline sits a descender up from its bottom edge. Both are measured
+    // in the page's own frame, so they stay right however the page is turned.
+    const size = placeOnPage([it.x, it.y, 0, it.size], rot, W, H).h;
+    const at = placeOnPage([it.x, it.y, 0, it.size * DESCENT], rot, W, H);
+    p.drawText(text, { x: at.x, y: at.y, size, font, color: rgb(0.06, 0.09, 0.16), rotate: degrees(rot) });
+  }
+  return save(doc);
+}
+
 export async function cropResize(
   bytes: Uint8Array,
-  { mode = 'crop', margin = 10, size = 'A4' }: { mode?: string; margin?: Num; size?: string } = {},
+  { mode = 'crop', size = 'A4', boxes = {} }: { mode?: string; size?: string; boxes?: CropBoxes } = {},
 ) {
   const src = await load(bytes);
   if (mode === 'crop') {
-    const pt = (parseFloat(String(margin)) || 0) * 2.8346; // mm -> pt
-    src.getPages().forEach((p) => {
-      const { x, y, width, height } = p.getCropBox();
-      if (pt * 2 >= Math.min(width, height)) throw new Error('Margin is larger than the page.');
-      p.setCropBox(x + pt, y + pt, width - pt * 2, height - pt * 2);
+    if (!Object.keys(boxes).length) throw new Error('Drag across a page to choose what to keep.');
+    src.getPages().forEach((p, i) => {
+      const box = boxes[i];
+      if (!box) return; // pages you didn't crop are left at their full size
+      const cb = p.getCropBox();
+      const [x, y, w, h] = unrotate(box, ((p.getRotation().angle % 360) + 360) % 360);
+      if (w * cb.width < 1 || h * cb.height < 1) throw new Error(`The crop on page ${i + 1} is too small.`);
+      p.setCropBox(cb.x + x * cb.width, cb.y + y * cb.height, w * cb.width, h * cb.height);
     });
     return save(src);
   }

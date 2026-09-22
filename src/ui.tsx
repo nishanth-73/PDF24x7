@@ -465,7 +465,8 @@ export function Options({ defs, value, onChange }: { defs: OptDef[]; value: Opts
               </View>
             ) : (
               <TextInput
-                style={s.input} value={value[d.key]} onChangeText={(v) => set(d.key, v)} placeholder={d.placeholder}
+                style={s.input} value={value[d.key]} placeholder={d.placeholder}
+                onChangeText={(v) => set(d.key, d.strip ? v.replace(d.strip, '') : v)}
                 placeholderTextColor={c.faint} keyboardType={d.keyboard ?? 'default'} autoCorrect={false}
                 keyboardAppearance={scheme}
               />

@@ -4,6 +4,7 @@ import type { KeyboardTypeOptions } from 'react-native';
 import type { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as P from './pdf';
 import { ocrPdf, recompressJpeg, redactPdf, setPdfPassword } from '../modules/pdf-thumbnails';
+import { readPicked } from './storage';
 
 export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 // Option values come straight from the UI: strings, or booleans for toggles.
@@ -11,7 +12,7 @@ export type Opts = Record<string, any>;
 type When = (o: Opts) => boolean;
 export type OptDef = { key: string; label: string; when?: When } & (
   | { type: 'seg'; choices: [value: string, label: string][]; def: string }
-  | { type: 'text'; def: string; placeholder?: string; keyboard?: KeyboardTypeOptions }
+  | { type: 'text'; def: string; placeholder?: string; keyboard?: KeyboardTypeOptions; strip?: RegExp }
   | { type: 'toggle'; def: boolean }
 );
 export type Output = P.Named & { ext?: string; full?: boolean }; // full: name already includes the source file name
@@ -30,13 +31,20 @@ export type Tool = {
 };
 export type WorkflowStep = { id: string; op: string; opts: Opts };
 
-// Grouped by the job you're doing. "Capture" is shown as the Scan card on Home, and as a group only in search.
-export const SECTIONS = ['Capture', 'Combine & split', 'Arrange pages', 'Optimize & stamp'];
+// Grouped by the job you're doing, in the order those jobs usually come: get pages in, put them in order, put
+// something on them, then finish up. "Capture" is shown as the Scan card on Home, and as a group only in search.
+export const SECTIONS = ['Capture', 'Combine & split', 'Arrange pages', 'Fill & mark up', 'Protect & shrink', 'Automate'];
 
 const seg = (key: string, label: string, choices: [string, string][], def: string, when?: When): OptDef =>
   ({ key, label, type: 'seg', choices, def, when });
 const text = (key: string, label: string, def: string, placeholder?: string, keyboard?: KeyboardTypeOptions, when?: When): OptDef =>
   ({ key, label, type: 'text', def, placeholder, keyboard, when });
+// Android's number keyboards still offer letters on many phones, and some have no comma or dash at all, so the field
+// filters what it accepts rather than trusting the keyboard to.
+const num = (key: string, label: string, def: string, placeholder?: string, when?: When): OptDef =>
+  ({ key, label, type: 'text', def, placeholder, keyboard: 'decimal-pad', strip: /[^0-9.]/g, when });
+const pageList = (key: string, label: string, def: string, placeholder?: string, when?: When): OptDef =>
+  ({ key, label, type: 'text', def, placeholder, keyboard: 'default', strip: /[^0-9,\-\s]/g, when });
 export const defaults = (defs: OptDef[] = []): Opts => Object.fromEntries(defs.map((d) => [d.key, d.def]));
 
 const O = {
@@ -50,6 +58,12 @@ const O = {
   axis: seg('axis', 'Mirror', [['h', 'Horizontal'], ['v', 'Vertical'], ['both', 'Both']], 'h'),
   perSheet: seg('perSheet', 'Pages per sheet', [['2', '2'], ['4', '4'], ['6', '6'], ['9', '9'], ['16', '16']], '4'),
 };
+
+// The crop editor renders these itself, above the page it draws on.
+export const CROP_OPTS: OptDef[] = [
+  seg('mode', 'Mode', [['crop', 'Crop pages'], ['resize', 'Resize pages']], 'crop'),
+  seg('size', 'Page size', Object.keys(P.SIZES).map((k): [string, string] => [k, k]), 'A4', (o) => o.mode === 'resize'),
+];
 
 type BytesOp = (bytes: Uint8Array, o: Opts) => Promise<Uint8Array>;
 const one = (suffix: string, fn: BytesOp) => async ([f]: P.Named[], o: Opts): Promise<Output[]> =>
@@ -92,7 +106,7 @@ export const TOOLS: Tool[] = [
     run: () => Promise.reject(new Error('Open the scanner from the Scan tab.')), // the scanner builds its own PDF
   },
   {
-    id: 'workflow', section: 3, input: 'pdfs', min: 1, cta: 'Run workflow', doing: 'Running your steps',
+    id: 'workflow', section: 5, input: 'pdfs', min: 1, cta: 'Run workflow', doing: 'Running your steps',
     title: 'PDF Workflow Builder',
     desc: 'Pick one or more PDFs, then chain any tools in order — merge, watermark, compress, split and more in one go.',
     run: (files, { steps = [] }) => runWorkflow(files, steps),
@@ -111,7 +125,7 @@ export const TOOLS: Tool[] = [
     run: async (files, o) => [{ name: 'mixed', bytes: await P.alternate(files, o) }],
   },
   {
-    id: 'compress', section: 3, input: 'pdf', cta: 'Compress PDF', doing: 'Recompressing images',
+    id: 'compress', section: 4, input: 'pdf', cta: 'Compress PDF', doing: 'Recompressing images',
     title: 'Compress PDF',
     desc: 'Reduce PDF file size by up to 70% while maintaining quality.',
     opts: [O.quality],
@@ -123,7 +137,7 @@ export const TOOLS: Tool[] = [
     desc: 'Separate PDF into individual pages or extract specific ranges.',
     opts: [
       seg('mode', 'Split into', [['every', 'Every page'], ['ranges', 'Custom ranges']], 'every'),
-      text('ranges', 'Page ranges — one file per range', '', '1-3, 4-6, 7-', 'default', (o) => o.mode === 'ranges'),
+      pageList('ranges', 'Page ranges — one file per range', '', '1-3, 4-6, 7-', (o) => o.mode === 'ranges'),
     ],
     run: many(P.split),
   },
@@ -151,7 +165,7 @@ export const TOOLS: Tool[] = [
     id: 'splitSize', section: 1, input: 'pdf', cta: 'Split by size', doing: 'Measuring parts',
     title: 'Split PDF by Size',
     desc: 'Break a large PDF into parts that each stay under a file size limit.',
-    opts: [text('maxMB', 'Max size per part (MB)', '5', '5', 'decimal-pad')],
+    opts: [num('maxMB', 'Max size per part (MB)', '5', '5')],
     run: many(P.splitBySize),
   },
   {
@@ -164,7 +178,7 @@ export const TOOLS: Tool[] = [
     id: 'rotate', section: 2, input: 'pdf', cta: 'Rotate PDF', doing: 'Rotating',
     title: 'Rotate PDF',
     desc: 'Rotate individual pages or the entire PDF — 90°, 180°, 270°.',
-    opts: [O.angle, text('pages', 'Pages (leave blank for all)', '', 'e.g. 1, 3-5')],
+    opts: [O.angle, pageList('pages', 'Pages (leave blank for all)', '', 'e.g. 1, 3-5')],
     run: one('rotated', P.rotate),
   },
   {
@@ -184,12 +198,8 @@ export const TOOLS: Tool[] = [
   {
     id: 'crop', section: 2, input: 'pdf', cta: 'Apply', doing: 'Resizing pages',
     title: 'Crop & Resize',
-    desc: 'Crop margins, resize pages to standard sizes (A4, Letter).',
-    opts: [
-      seg('mode', 'Mode', [['crop', 'Crop margins'], ['resize', 'Resize pages']], 'crop'),
-      text('margin', 'Trim from every edge (mm)', '10', '10', 'decimal-pad', (o) => o.mode === 'crop'),
-      seg('size', 'Page size', Object.keys(P.SIZES).map((k): [string, string] => [k, k]), 'A4', (o) => o.mode === 'resize'),
-    ],
+    desc: 'Drag on each page to keep just the part you want, or resize every page to a standard size (A4, Letter).',
+    opts: CROP_OPTS,
     run: one('resized', P.cropResize),
   },
   {
@@ -197,6 +207,20 @@ export const TOOLS: Tool[] = [
     title: 'PDF to ZIP',
     desc: 'Bundle multiple PDFs into a single compressed ZIP archive.',
     run: async (files) => [{ name: 'bundle', bytes: P.zip(files), ext: 'zip' }],
+  },
+  {
+    id: 'fillSign', section: 3, input: 'pdf', cta: 'Apply', doing: 'Writing on the pages',
+    title: 'Fill & Sign',
+    desc: 'Type straight onto a form and drop in a picture of your signature, anywhere on any page — a real form or a scan of one.',
+    run: one('signed', async (bytes, o) => {
+      const items: P.SignItem[] = o.items ?? [];
+      if (!items.length) throw new Error('Add some text or a picture to a page first.');
+      const images: Record<string, Uint8Array> = {};
+      for (const it of items) {
+        if (it.kind === 'image' && !images[it.uri]) images[it.uri] = await readPicked(it.uri);
+      }
+      return P.fillSign(bytes, items, images);
+    }),
   },
   {
     id: 'watermark', section: 3, input: 'pdf', cta: 'Add watermark', doing: 'Stamping every page',
@@ -222,7 +246,7 @@ export const TOOLS: Tool[] = [
     },
   },
   {
-    id: 'ocr', section: 3, input: 'pdf', cta: 'Make searchable', doing: 'Reading every page',
+    id: 'ocr', section: 4, input: 'pdf', cta: 'Make searchable', doing: 'Reading every page',
     title: 'OCR Scanned PDF',
     desc: 'Read the text in a scanned PDF and lay it invisibly over the pages, so it can be searched, selected and copied. Runs on your phone.',
     run: one('searchable', async (bytes) => {
@@ -232,7 +256,7 @@ export const TOOLS: Tool[] = [
     }),
   },
   {
-    id: 'password', section: 3, input: 'pdf', noPreview: true, cta: 'Set password', doing: 'Encrypting',
+    id: 'password', section: 4, input: 'pdf', noPreview: true, cta: 'Set password', doing: 'Encrypting',
     title: 'Set Password',
     desc: 'Lock a PDF so it asks for a password before it opens.',
     // visible-password: Android keyboard with no auto-capitals or suggestions, and the text stays readable to avoid typos
