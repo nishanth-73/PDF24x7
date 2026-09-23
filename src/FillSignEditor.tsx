@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, PanResponder, Pressable, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { pageSizes, renderPage, renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
-import type { SignItem } from './pdf';
+import { winAnsi, type SignItem } from './pdf';
 import { Button, IconBtn, Icon, PromptModal, plural } from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 import type { EditorProps } from './ToolRunner';
@@ -83,6 +83,10 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
     const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
     if (r.canceled || !r.assets[0]) return;
     const a = r.assets[0];
+    if (a.mimeType && !/^image\/(png|jpe?g)$/i.test(a.mimeType)) {
+      onError('Pick a JPEG or PNG picture. HEIC, WebP and other formats can’t go into a PDF here.');
+      return;
+    }
     // Keep the picture's shape: its width is a share of the page, its height follows from the aspect on screen.
     const aspect = (a.height || 1) / (a.width || 1);
     const h = dw && dh ? (IMG_W * dw * aspect) / dh : IMG_W * aspect;
@@ -112,10 +116,13 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
         if (it) m.current.start = { x: it.x, y: it.y };
       },
       onPanResponderMove: (_, g) => {
+        // Kept on the page: a picture wholly, a line of text (whose width isn't known here) by its start and height.
+        const it = m.current.items[i];
+        const [w, h] = it?.kind === 'image' ? [it.w, it.h] : [0.05, it?.size ?? 0];
         const at = {
           i,
-          x: clamp(m.current.start.x + g.dx / (m.current.dw || 1)),
-          y: clamp(m.current.start.y + g.dy / (m.current.dh || 1)),
+          x: Math.min(clamp(m.current.start.x + g.dx / (m.current.dw || 1)), Math.max(0, 1 - w)),
+          y: Math.min(clamp(m.current.start.y + g.dy / (m.current.dh || 1)), Math.max(0, 1 - h)),
         };
         live.current = at;
         setDrag(at);
@@ -221,10 +228,14 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
         visible={typing !== null} title={typing === -1 ? 'Add text' : 'Edit text'} placeholder="Type what goes on the page"
         initialValue={typing !== null && typing >= 0 && items[typing]?.kind === 'text' ? (items[typing] as { text: string }).text : ''}
         submitLabel={typing === -1 ? 'Add' : 'Save'} onClose={() => setTyping(null)}
-        onSubmit={(t) => {
+        onSubmit={(typed) => {
+          setTyping(null);
+          // The page gets Helvetica, which only writes Latin text: store what it can write, and say what it can't.
+          const t = winAnsi(typed).trim();
+          if (!t) return onError('Text on the page can only use Latin letters, numbers and common symbols.');
+          if (/[^\x20-\x7E\xA0-\xFF‘’“”–—₹]/.test(typed)) onError('Some characters can’t be written on a PDF page and were left out.');
           if (typing === -1) add({ page: index, kind: 'text', x: 0.1, y: 0.1, size: TEXT_SIZE, text: t });
           else if (typing !== null) edit(typing, { text: t } as Partial<SignItem>);
-          setTyping(null);
         }}
       />
 

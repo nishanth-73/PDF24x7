@@ -1,6 +1,8 @@
-// Modal for choosing one or more PDFs from the app's saved files and folders.
+// Modal for choosing one or more PDFs from the app's saved files and folders, or (with Drive sync on) from the synced
+// Google Drive folder: those are fetched into the cache only once picked, so choosing them doesn't fill the phone.
 import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   BackHandler,
   Modal,
   Pressable,
@@ -12,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { listAllFiles, listFiles, listFolders, type Folder, type Saved } from './storage';
+import { cachedDriveFiles, describeDriveError, downloadDriveFile, listDriveFiles, readBackup, type DriveFile, type DriveListing } from './backup';
 import { DocGlyph, FolderGlyph, ToolArt } from './art';
 import { Button, Group, GroupLabel, Icon, IconBtn, Marquee, fmtDate, fmtSize, plural, stem } from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
@@ -19,6 +22,10 @@ import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 export type PickedFile = { name: string; uri: string; size?: number | null };
 
 type FolderWithCount = Folder & { fileCount: number };
+
+// Drive files and folders go through the same lists as saved ones, under uris no phone file can have.
+const DRIVE = 'drive:';
+const asSaved = (f: DriveFile): Saved => ({ name: f.name, uri: DRIVE + f.id, size: f.size, modified: f.modified });
 
 export interface AppFilesPickerModalProps {
   visible: boolean;
@@ -44,9 +51,23 @@ export function AppFilesPickerModal({
   const [files, setFiles] = useState<Saved[]>([]);
   const [allFiles, setAllFiles] = useState<Saved[]>([]);
   const [selectedMap, setSelectedMap] = useState<Record<string, PickedFile>>({});
+  const [source, setSource] = useState<'phone' | 'drive'>('phone');
+  const [drive, setDrive] = useState<DriveListing | null>(null);
+  const [busy, setBusy] = useState(''); // fetching picked Drive files
+  const [problem, setProblem] = useState('');
+  const driveOn = readBackup().enabled;
 
   // Reload folders and files when modal opens or currentFolder changes
   const reload = useCallback(() => {
+    if (source === 'drive') {
+      const list = drive?.files ?? [];
+      setFolders((drive?.folders ?? []).map((name) => ({
+        name, uri: `drive-folder:${name}`, created: 0, fileCount: list.filter((f) => f.folder === name).length,
+      })));
+      setFiles(list.filter((f) => f.folder === (currentFolder?.name ?? '')).map(asSaved));
+      setAllFiles(list.map(asSaved));
+      return;
+    }
     const loadedFolders = listFolders().map((f) => ({
       ...f,
       fileCount: listFiles(f.uri).filter((x) => x.name.toLowerCase().endsWith('.pdf')).length,
@@ -54,12 +75,52 @@ export function AppFilesPickerModal({
     setFolders(loadedFolders);
     setFiles(listFiles(currentFolder?.uri).filter((x) => x.name.toLowerCase().endsWith('.pdf')));
     setAllFiles(listAllFiles().filter((x) => x.name.toLowerCase().endsWith('.pdf')));
-  }, [currentFolder]);
+  }, [currentFolder, source, drive]);
+
+  const showSource = async (next: 'phone' | 'drive') => {
+    setSource(next);
+    setCurrentFolder(null);
+    setQuery('');
+    setProblem('');
+    if (next !== 'drive') return;
+    const cached = cachedDriveFiles(); // the listing the Drive tab or the last sync left behind
+    if (cached) { setDrive(cached); return; }
+    try {
+      setDrive(await listDriveFiles());
+    } catch (e) {
+      setProblem(describeDriveError(e));
+    }
+  };
+
+  // Picked Drive files become cache copies the tool can read; phone files pass straight through.
+  const finish = async (list: PickedFile[]) => {
+    if (busy) return;
+    const byUri = new Map((drive?.files ?? []).map((f) => [DRIVE + f.id, f]));
+    const out: PickedFile[] = [];
+    setProblem('');
+    try {
+      for (const p of list) {
+        const f = byUri.get(p.uri);
+        if (!f) { out.push(p); continue; }
+        setBusy(`Getting “${stem(f.name)}” from Drive…`);
+        out.push(await downloadDriveFile(f));
+      }
+    } catch (e) {
+      setProblem(describeDriveError(e));
+      setBusy('');
+      return;
+    }
+    setBusy('');
+    onSelect(out);
+    onClose();
+  };
 
   // Fresh state each time the picker opens. Only `visible` triggers it: this used to also depend on `reload`, which
   // changes when a folder opens, so opening a folder reset straight back to the top level.
   useEffect(() => {
     if (!visible) return;
+    setSource('phone');
+    setProblem('');
     setCurrentFolder(null);
     setQuery('');
     const initialMap: Record<string, PickedFile> = {};
@@ -105,20 +166,13 @@ export function AppFilesPickerModal({
   };
 
   const handleRowPress = (f: Saved) => {
-    if (multi) {
-      toggleSelect(f);
-    } else {
-      onSelect([{ name: f.name, uri: f.uri, size: f.size }]);
-      onClose();
-    }
+    if (multi) toggleSelect(f);
+    else finish([{ name: f.name, uri: f.uri, size: f.size }]);
   };
 
   const handleConfirmMulti = () => {
     const chosen = Object.values(selectedMap);
-    if (chosen.length > 0) {
-      onSelect(chosen);
-      onClose();
-    }
+    if (chosen.length > 0) finish(chosen);
   };
 
   // Determine displayed files based on search vs folder navigation
@@ -174,21 +228,34 @@ export function AppFilesPickerModal({
                 ? `Search in App Files`
                 : currentFolder
                 ? currentFolder.name
-                : 'App Files · Saved documents'}
+                : source === 'drive' ? 'Google Drive · PDF Tools folder' : 'App Files · Saved documents'}
             </Text>
           </View>
 
           <IconBtn name="close" size={22} color={c.ink} onPress={onClose} />
         </View>
 
-        {/* Search Bar */}
+        {/* Search Bar, with the phone / Drive switch above it when Drive sync is on */}
         <View style={s.searchWrap}>
+          {driveOn && (
+            <View style={s.seg}>
+              {([['phone', 'cellphone', 'This phone'], ['drive', 'google-drive', 'Google Drive']] as const).map(([key, icon, label]) => {
+                const on = source === key;
+                return (
+                  <Pressable key={key} onPress={() => !on && showSource(key)} style={[s.segItem, on && s.segOn]} accessibilityRole="tab" accessibilityState={{ selected: on }}>
+                    <Icon name={icon} size={16} color={on ? c.ink : c.sub} />
+                    <Text style={[s.segText, on && { color: c.ink }]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
           <View style={s.searchBar}>
             <Icon name="magnify" size={20} color={c.faint} />
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search saved PDFs…"
+              placeholder={source === 'drive' ? 'Search Drive PDFs…' : 'Search saved PDFs…'}
               placeholderTextColor={c.faint}
               style={s.searchInput}
               keyboardAppearance={scheme}
@@ -203,7 +270,17 @@ export function AppFilesPickerModal({
           </View>
         </View>
 
+        {(!!busy || !!problem) && (
+          <View style={s.status}>
+            {!!busy && <ActivityIndicator color={c.accent} />}
+            <Text style={[s.statusText, !busy && { color: c.accent }]}>{busy || problem}</Text>
+          </View>
+        )}
+
         {/* List Content */}
+        {source === 'drive' && !drive && !problem ? (
+          <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: 40 }}><ActivityIndicator color={c.accent} /></View>
+        ) : (
         <ScrollView style={{ flex: 1, backgroundColor: c.bg }} contentContainerStyle={s.scrollContent} keyboardShouldPersistTaps="handled">
           {/* If not searching and at root: show Folders */}
           {!trimmed && !currentFolder && folders.length > 0 && (
@@ -302,11 +379,12 @@ export function AppFilesPickerModal({
                   ? `No PDF files found matching "${query}".`
                   : currentFolder
                   ? 'PDFs saved or moved into this folder will appear here.'
-                  : 'PDFs saved from your tools will appear here.'}
+                  : source === 'drive' ? 'PDFs in the PDF Tools folder of your Google Drive will appear here.' : 'PDFs saved from your tools will appear here.'}
               </Text>
             </View>
           )}
         </ScrollView>
+        )}
 
         {/* Multi-selection sticky bottom bar */}
         {multi && (
@@ -323,7 +401,7 @@ export function AppFilesPickerModal({
             </View>
             <Button
               label={selectedCount ? `Add (${selectedCount})` : 'Select PDFs'}
-              disabled={selectedCount === 0}
+              disabled={selectedCount === 0} busy={!!busy}
               onPress={handleConfirmMulti}
               style={{ minWidth: 120 }}
             />
@@ -371,6 +449,15 @@ const useStyles = makeStyles((c) => ({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.lineStrong,
   },
+  seg: { flexDirection: 'row', padding: 3, borderRadius: radius.control, backgroundColor: c.sunken, marginBottom: 10 },
+  segItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 7, borderRadius: radius.control - 3 },
+  segOn: { backgroundColor: c.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
+  segText: { fontFamily: fonts.med, fontSize: 13.5, color: c.sub },
+  status: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: c.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.lineStrong,
+  },
+  statusText: { ...typo.small, color: c.sub, flex: 1 },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',

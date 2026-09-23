@@ -154,7 +154,8 @@ function DriveBackup({ files, lead }: { files: Saved[]; lead: (name: IconName, d
           </>
         )}
       </Group>
-      {!!(error || (state.enabled && state.error)) && <Text style={s.backupError}>{error || state.error}</Text>}
+      {/* The last run's problem is hidden while a new run is trying again. */}
+      {!!(error || (state.enabled && !syncing && state.error)) && <Text style={s.backupError}>{error || state.error}</Text>}
       {state.enabled && (
         <Text style={s.backupNote}>
           Syncs both ways whenever you save, rename, move or delete a file, and when you open Files. Deleted files go to

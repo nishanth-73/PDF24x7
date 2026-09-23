@@ -16,6 +16,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDDocumentInformation
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.PDResources
@@ -236,7 +237,9 @@ class PdfThumbnailsModule : Module() {
           }
           if (redacted.isNotEmpty()) {
             val catalog = doc.documentCatalog.cosObject
-            listOf("AcroForm", "StructTreeRoot", "MarkInfo").forEach { catalog.removeItem(COSName.getPDFName(it)) }
+            // The document's title, author, subject and keywords (and their XMP copy) can repeat what was redacted.
+            listOf("AcroForm", "StructTreeRoot", "MarkInfo", "Metadata").forEach { catalog.removeItem(COSName.getPDFName(it)) }
+            doc.documentInformation = PDDocumentInformation()
             // Annotations elsewhere can still point at the removed ones (a popup's /Parent, a reply's /IRT, a form widget's
             // field parent listing its sibling widgets), which would keep them, and their text, in the saved file.
             for ((i, page) in doc.pages.withIndex()) {
@@ -505,9 +508,21 @@ class PdfThumbnailsModule : Module() {
       Uri.fromFile(out).toString()
     }
 
-    // Re-encodes one JPEG at `quality` (0-100). Null when Android can't decode it (CMYK and other rare flavours).
-    AsyncFunction("recompressJpeg") { bytes: ByteArray, quality: Int ->
-      val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@AsyncFunction null
+    // Re-encodes one JPEG at `quality` (0-100), shrunk so its long side is at most `maxSide` px (0 keeps the size).
+    // Null when Android can't decode it (CMYK and other rare flavours).
+    AsyncFunction("recompressJpeg") { bytes: ByteArray, quality: Int, maxSide: Int ->
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+      val long = maxOf(bounds.outWidth, bounds.outHeight)
+      var sample = 1 // decode near the target size rather than whole: a 6000 px scan is ~140 MB as pixels
+      while (maxSide > 0 && long / (sample * 2) >= maxSide) sample *= 2
+      val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+        ?: return@AsyncFunction null
+      val k = if (maxSide > 0) minOf(1f, maxSide.toFloat() / maxOf(decoded.width, decoded.height)) else 1f
+      val bitmap = if (k < 1f) {
+        Bitmap.createScaledBitmap(decoded, (decoded.width * k).toInt().coerceAtLeast(1), (decoded.height * k).toInt().coerceAtLeast(1), true)
+          .also { if (it !== decoded) decoded.recycle() }
+      } else decoded
       try {
         ByteArrayOutputStream(bytes.size / 2).use { out ->
           bitmap.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), out)
@@ -515,6 +530,18 @@ class PdfThumbnailsModule : Module() {
         }
       } finally {
         bitmap.recycle()
+      }
+    }
+
+    // Each page's text, read by PdfBox, which handles the CID fonts pdf-lib's naive scan can't.
+    AsyncFunction("pageTexts") { bytes: ByteArray ->
+      PDDocument.load(bytes).use { doc ->
+        val stripper = PDFTextStripper()
+        (1..doc.numberOfPages).map { i ->
+          stripper.startPage = i
+          stripper.endPage = i
+          stripper.getText(doc)
+        }
       }
     }
 

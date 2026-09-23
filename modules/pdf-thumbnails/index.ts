@@ -8,7 +8,8 @@ type Native = {
   pageRotations(uri: string): Promise<number[]>;
   ocr(bytes: Uint8Array): Promise<Uint8Array | null>;
   buildScanPdf(sheetsJson: string, images: string[]): Promise<string>;
-  recompressJpeg(bytes: Uint8Array, quality: number): Promise<Uint8Array | null>;
+  recompressJpeg(bytes: Uint8Array, quality: number, maxSide: number): Promise<Uint8Array | null>;
+  pageTexts(bytes: Uint8Array): Promise<string[]>;
   setPassword(bytes: Uint8Array, password: string): Promise<Uint8Array | null>;
   toJpeg(uri: string): Promise<string>;
   toDocx(uri: string): Promise<string>;
@@ -37,8 +38,11 @@ export const ocrPdf = (bytes: Uint8Array) => native.ocr(bytes);
 // bridge: the images are read, and the PDF written, natively.
 export const buildScanPdf = (sheets: Sheet[], images: string[]) => native.buildScanPdf(JSON.stringify(sheets), images);
 
-// Re-encodes a JPEG off the JS thread; null if Android can't decode it.
-export const recompressJpeg = (bytes: Uint8Array, quality: number) => native.recompressJpeg(bytes, quality);
+// Re-encodes a JPEG off the JS thread, long side at most `maxSide` px (0 keeps it); null if Android can't decode it.
+export const recompressJpeg = (bytes: Uint8Array, quality: number, maxSide: number) => native.recompressJpeg(bytes, quality, maxSide);
+
+// Each page's text (PdfBox), for tools that look for words on a page.
+export const pageTexts = (bytes: Uint8Array) => native.pageTexts(bytes);
 
 // AES-256 password on a PDF; null if it already has one.
 export const setPdfPassword = (bytes: Uint8Array, password: string) => native.setPassword(bytes, password);

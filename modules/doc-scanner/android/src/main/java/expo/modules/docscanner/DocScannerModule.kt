@@ -42,6 +42,16 @@ class DocScannerModule : Module() {
       mapOf("uri" to uri, "width" to bmp.width, "height" to bmp.height, "corners" to corners?.toList()).also { bmp.recycle() }
     }
 
+    // What to keep of a rendered PDF page, [x, y, w, h] fractions, or null when there's nothing to trim.
+    AsyncFunction("autoCrop") { uri: String ->
+      val bmp = DocVision.load(context, uri, 1200)
+      try {
+        DocVision.autoCrop(bmp)?.toList()
+      } finally {
+        bmp.recycle()
+      }
+    }
+
     AsyncFunction("process") { uri: String, options: ProcessOptions ->
       DocVision.process(context, uri, options)
     }

@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, PanResponder, Pressable, Text, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { pageSizes, renderPage, renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
+import { autoCropPage } from '../modules/doc-scanner';
 import type { CropBoxes } from './pdf';
 import { CROP_OPTS } from './tools';
-import { IconBtn, Icon, Options, PromptModal, plural } from './ui';
+import { Button, IconBtn, Icon, Options, PromptModal, plural } from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 import type { EditorProps } from './ToolRunner';
 
@@ -80,6 +81,37 @@ export function PdfCropEditor({ file, value, onChange, onError }: EditorProps) {
     if (!box) return v;
     return { ...v, boxes: Object.fromEntries(Array.from({ length: count }, (_, i) => [i, box])) };
   });
+
+  // Auto crop: each page is rendered (the same cached render the editor shows) and trimmed on the device, to its ink or,
+  // for a photographed page, to the sheet the page detector finds. `auto` says which button is running and its progress.
+  // The crops land in one change at the end: one per page re-rendered the editor and re-saved the draft every page.
+  const [auto, setAuto] = useState<{ all: boolean; label: string } | null>(null);
+  const [note, setNote] = useState('');
+  const autoCrop = async (pages: number[]) => {
+    const uri = file?.uri;
+    if (!uri || auto) return;
+    const all = pages.length > 1;
+    setNote('');
+    setAuto({ all, label: all ? `1 of ${pages.length}…` : 'Cropping…' });
+    const found: CropBoxes = {};
+    try {
+      for (const [n, i] of pages.entries()) {
+        if (shownUri.current !== uri) return; // another PDF was picked meanwhile
+        if (all) setAuto({ all, label: `${n + 1} of ${pages.length}…` });
+        const box = await autoCropPage((await renderPage(uri, i, 1000)).uri);
+        if (box) found[i] = box;
+      }
+      if (Object.keys(found).length) onChange((v) => ({ ...v, boxes: { ...(v.boxes ?? {}), ...found } }));
+      const count = Object.keys(found).length;
+      setNote(count
+        ? all ? `Auto crop trimmed ${plural(count, 'page')} of ${pages.length}. Drag any corner to adjust.` : 'Trimmed. Drag any corner to adjust.'
+        : all ? 'Nothing to trim: every page already runs to its edges.' : 'Nothing to trim: this page already runs to its edges.');
+    } catch {
+      onError('Auto crop could not read this PDF.');
+    } finally {
+      setAuto(null);
+    }
+  };
 
   // The responders are made once and read the current page, size and rect through this ref.
   const m = useRef({ dw, dh, index, stored, setBox, start: FULL });
@@ -185,6 +217,20 @@ export function PdfCropEditor({ file, value, onChange, onError }: EditorProps) {
             )}
           </View>
 
+          {/* Both buttons stay put while one runs (the other just stops taking taps), so nothing jumps or fades. */}
+          <View style={s.autoRow}>
+            <Button
+              icon="auto-fix" label={auto && !auto.all ? auto.label : 'Auto crop'} variant="secondary" busy={!!auto && !auto.all}
+              onPress={() => !auto && !loading && autoCrop([index])} style={{ flex: 1 }}
+            />
+            {count > 1 && (
+              <Button
+                icon="auto-fix" label={auto?.all ? auto.label : 'Auto crop all'} variant="secondary" busy={!!auto?.all}
+                onPress={() => !auto && autoCrop(Array.from({ length: count }, (_, i) => i))} style={{ flex: 1 }}
+              />
+            )}
+          </View>
+
           {/* Every page, to scroll through and spot the one you need; a dot marks pages that are cropped. */}
           {count > 1 && (
             <FlatList
@@ -215,9 +261,9 @@ export function PdfCropEditor({ file, value, onChange, onError }: EditorProps) {
           />
 
           <Text style={s.hint}>
-            {cropped
+            {note || (cropped
               ? `${plural(cropped, 'page')} cropped. Every page has its own frame — leave one alone to keep it whole.`
-              : 'Pull the corners in to keep just part of the page. Every page has its own frame.'}
+              : 'Pull the corners in, or tap Auto crop to trim the margins. Every page has its own frame.')}
           </Text>
         </>
       )}
@@ -235,6 +281,7 @@ const useStyles = makeStyles((c) => ({
   },
   loading: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: c.page, opacity: 0.6 },
   bar: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  autoRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
   pageBtn: { flexDirection: 'row', alignItems: 'center', paddingLeft: 6, paddingRight: 2, paddingVertical: 4, borderRadius: 8 },
   pageNum: { fontFamily: fonts.med, fontSize: 14, color: c.ink },
   strip: { gap: STRIP_GAP, paddingVertical: 8, paddingHorizontal: 2 },

@@ -3,8 +3,8 @@ import { memo, useCallback, useEffect, useRef, useState, type ComponentType, typ
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import { watermarkLayout, zip, type PageInfo, type PageOrder } from './pdf';
-import { defaults, stepTools, toolById, type Opts, type Output, type Tool, type WorkflowStep } from './tools';
+import { watermarkLayout, winAnsi, zip, type PageInfo, type PageOrder } from './pdf';
+import { defaults, stepOpts, stepTitle, stepTools, toolById, type Opts, type Output, type Tool, type WorkflowStep } from './tools';
 import { openFile, readPicked, save, saveTemp, share, type Saved } from './storage';
 import { ArtTile, DocGlyph, kindOf } from './art';
 import { pageRotations, pageSizes, renderThumbnails, unlockPdf, type Thumb } from '../modules/pdf-thumbnails';
@@ -18,6 +18,7 @@ import { PdfCropEditor } from './PdfCropEditor';
 import { FillSignEditor } from './FillSignEditor';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 import { getToolDraft, setToolDraft } from './toolDraft';
+import { readBackup } from './backup';
 
 type Picked = PickedFile;
 type Result = Saved & { bytes: Uint8Array };
@@ -190,7 +191,7 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
               <Icon name="folder-outline" size={26} color={c.accent} />
             </View>
             <Text style={s.pickerTitle}>App Files</Text>
-            <Text style={s.pickerSub}>Saved in PDF Tools</Text>
+            <Text style={s.pickerSub}>{readBackup().enabled ? 'Saved here or in Drive' : 'Saved in PDF Tools'}</Text>
           </Pressable>
         </View>
       )}
@@ -249,7 +250,8 @@ export default function ToolRunner({ tool, onBack, resume }: { tool: Tool; onBac
       <PromptModal
         visible={!!naming} title="Save as" placeholder="File name" initialValue={naming?.name} submitLabel="Save" cancelLabel="Discard"
         subtitle={naming && naming.outs.length > 1 ? `Each of the ${naming.outs.length} files starts with this name.` : 'Saved in Files.'}
-        onSubmit={saveAs} onClose={() => setNaming(null)}
+        // Only Discard throws the result away; back or a stray tap outside keeps it under the suggested name.
+        onSubmit={saveAs} onClose={() => setNaming(null)} onDismiss={() => naming && saveAs(naming.name)}
       />
 
       {(Editor || !!tool.opts?.length) && (
@@ -463,7 +465,7 @@ function WatermarkEditor({ file, value, onChange, onError }: EditorProps) {
   const { c } = useTheme();
   const [page, setPage] = useState<{ info: PageInfo; thumb: Thumb } | null>(null);
   const [areaW, setAreaW] = useState(0);
-  const text = String(value.text ?? '');
+  const text = winAnsi(String(value.text ?? '')).trim(); // exactly what the stamp will say
 
   useEffect(() => {
     setPage(null);
@@ -489,7 +491,7 @@ function WatermarkEditor({ file, value, onChange, onError }: EditorProps) {
     const fit = Math.min(areaW / t.width, PREVIEW_H / t.height);
     const [w, h] = [t.width * fit, t.height * fit];
     const k = Math.hypot(w, h) / Math.hypot(p.width, p.height); // page points -> preview px
-    const L = text.trim() ? watermarkLayout(text, p.width, p.height, value.scale) : null;
+    const L = text ? watermarkLayout(text, p.width, p.height, value.scale) : null;
     return (
       <View style={[s.pageBox, { width: w, height: h }]}>
         <Image source={{ uri: t.uri }} style={StyleSheet.absoluteFill} />
@@ -527,20 +529,23 @@ function WorkflowEditor({ value, onChange }: EditorProps) {
     <>
       <Reorderable
         data={steps} gap={10} keyOf={(step) => step.id} onReorder={set} handle
-        renderItem={(step, k) => (
-          <View style={s.stepCard}>
-            <View style={s.stepCardHead}>
-              <Text style={s.stepNum}>{k + 1}</Text>
-              <Text style={s.stepCardTitle}>{toolById(step.op)!.title}</Text>
-              <IconBtn name="close" onPress={() => set(steps.filter((_, j) => j !== k))} />
-              <DragHandle index={k} move={move} />
+        renderItem={(step, k) => {
+          const t = toolById(step.op); // undefined only for a step saved by an older version that dropped the tool
+          return (
+            <View style={s.stepCard}>
+              <View style={s.stepCardHead}>
+                <Text style={s.stepNum}>{k + 1}</Text>
+                <Text style={s.stepCardTitle}>{t ? stepTitle(t) : 'Unavailable step'}</Text>
+                <IconBtn name="close" onPress={() => set(steps.filter((_, j) => j !== k))} />
+                <DragHandle index={k} move={move} />
+              </View>
+              <Options
+                defs={t ? stepOpts(t) : []} value={step.opts}
+                onChange={(o) => set(steps.map((x, j) => (j === k ? { ...x, opts: o } : x)))}
+              />
             </View>
-            <Options
-              defs={toolById(step.op)!.opts ?? []} value={step.opts}
-              onChange={(o) => set(steps.map((x, j) => (j === k ? { ...x, opts: o } : x)))}
-            />
-          </View>
-        )}
+          );
+        }}
       />
       <Text style={[s.hint, { marginTop: steps.length ? 12 : 0, marginBottom: 10 }]}>
         {steps.length
@@ -551,10 +556,10 @@ function WorkflowEditor({ value, onChange }: EditorProps) {
         {stepTools().map((t) => (
           <Pressable
             key={t.id} style={({ pressed }) => [s.addChip, pressed && { backgroundColor: c.sunken }]}
-            onPress={() => set([...steps, { id: `${t.id}-${Math.random()}`, op: t.id, opts: defaults(t.opts) }])}
+            onPress={() => set([...steps, { id: `${t.id}-${Math.random()}`, op: t.id, opts: defaults(stepOpts(t)) }])}
           >
             <Icon name="plus" size={14} color={c.ink} />
-            <Text style={s.addChipText}>{t.title}</Text>
+            <Text style={s.addChipText}>{stepTitle(t)}</Text>
           </Pressable>
         ))}
       </View>

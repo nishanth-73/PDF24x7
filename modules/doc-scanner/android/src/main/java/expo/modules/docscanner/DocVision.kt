@@ -45,6 +45,53 @@ object DocVision {
     return PageDetector.detect(rgba).also { rgba.release(); if (small !== bmp) small.recycle() }
   }
 
+  // What to keep of a rendered PDF page, as [x, y, w, h] fractions (y from the top). First the ink: everything clearly
+  // darker than the paper, plus a small margin. When the ink runs to the edges (a photo of a page lying on a desk), the
+  // page detector (DocAligner model, then the classical fallback) finds the sheet instead. Null when neither trims anything.
+  fun autoCrop(bmp: Bitmap): DoubleArray? {
+    val scale = 800.0 / max(bmp.width, bmp.height)
+    val small = if (scale < 1) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).roundToInt(), (bmp.height * scale).roundToInt(), true) else bmp
+    val rgba = Mat()
+    Utils.bitmapToMat(small, rgba)
+    val gray = Mat()
+    Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+    rgba.release()
+    val w = gray.cols().toDouble()
+    val h = gray.rows().toDouble()
+
+    // Paper is the brightest tenth of the page; scans on grey or yellowed paper sit well below white.
+    val px = ByteArray(gray.cols() * gray.rows())
+    gray.get(0, 0, px)
+    val hist = IntArray(256)
+    for (b in px) hist[b.toInt() and 0xFF]++
+    var paper = 255
+    var seen = 0
+    while (paper > 0 && seen + hist[paper] < px.size / 10) seen += hist[paper--]
+    val ink = Mat()
+    Imgproc.threshold(gray, ink, (paper - 35).coerceAtLeast(30).toDouble(), 255.0, Imgproc.THRESH_BINARY_INV)
+    // Scanner dust and JPEG speckle mustn't hold a margin open.
+    Imgproc.morphologyEx(ink, ink, Imgproc.MORPH_OPEN, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
+    val r = Imgproc.boundingRect(ink)
+    gray.release()
+    ink.release()
+
+    val pad = 0.015
+    val found = if (r.width > 0 && r.height > 0) doubleArrayOf(r.x / w - pad, r.y / h - pad, (r.x + r.width) / w + pad, (r.y + r.height) / h + pad) else null
+    val edges = found == null || (found[2] - found[0] >= 0.97 && found[3] - found[1] >= 0.97)
+    val box = if (!edges) found else detectBitmap(small)?.let { c ->
+      val xs = listOf(c[0], c[2], c[4], c[6])
+      val ys = listOf(c[1], c[3], c[5], c[7])
+      doubleArrayOf(xs.min(), ys.min(), xs.max(), ys.max())
+    }
+    if (small !== bmp) small.recycle()
+    if (box == null) return null
+    val (x0, y0) = box[0].coerceIn(0.0, 1.0) to box[1].coerceIn(0.0, 1.0)
+    val (x1, y1) = box[2].coerceIn(0.0, 1.0) to box[3].coerceIn(0.0, 1.0)
+    // Too small to be the page, or trims next to nothing: leave the page alone.
+    if (x1 - x0 < 0.06 || y1 - y0 < 0.06 || (x1 - x0 >= 0.97 && y1 - y0 >= 0.97)) return null
+    return doubleArrayOf(x0, y0, x1 - x0, y1 - y0)
+  }
+
   // ── Loading & saving ───────────────────────────────────────────────────────
 
   // Decodes upright (EXIF applied), downsampled so the long side stays near maxSize.

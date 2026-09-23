@@ -35,6 +35,10 @@ const recode: P.RecodeJpeg = async (b, q) => new Uint8Array(jpeg.encode(jpeg.dec
 const small = await P.compress(src, { quality: 30 }, recode);
 assert.ok(small.length < src.length * 0.7, `compress ${src.length} -> ${small.length}`);
 assert.equal(await count(small), 6);
+assert.deepEqual(P.jpegSize(photo), [300, 300]);
+// A PDF with no photos is handed back as it was, never bigger.
+const plain = await (async () => { const d = await PDFDocument.create(); d.addPage(); return d.save({ useObjectStreams: false }); })();
+assert.ok((await P.compress(plain, { quality: 60 }, recode)).length <= plain.length);
 assert.equal((await P.split(src, { mode: 'every' })).length, 6);
 assert.deepEqual(await counts(await P.split(src, { mode: 'ranges', ranges: '1-2,3-' })), [2, 4]);
 assert.deepEqual(await counts(await P.splitByText(src, { phrase: 'CHAPTER' })), [3, 3]);
@@ -94,10 +98,36 @@ assert.equal(sheets('id', 2)[0].items.length, 2);
 assert.deepEqual(sheets('book')[1].items[0].crop, { x: 0.5, y: 0, w: 0.5, h: 1 });
 const letter = sheets('doc', 1, 'Letter-portrait')[0];
 assert.deepEqual([letter.W, letter.H], [612, 792]);
-const extracted = await P.extractAllText(src);
-assert.equal(extracted.length, 6);
-assert.ok(extracted[0].text.includes('Chapter 1'));
-assert.ok(extracted[3].text.includes('Chapter 4'));
+// The text reader is pluggable: the app hands PdfBox's in, here a stand-in proves the split follows what it reads.
+assert.deepEqual(await counts(await P.splitByText(src, { phrase: 'invoice' }, async () => ['', 'Invoice 1', '', '', 'Invoice 2', ''])), [1, 3, 2]);
+
+// ── Pages saved sideways (/Rotate 90) ─────────────────────────────────────
+// Page 1 of `sideways` is stored 400x600 and shown 600x400, a book spread; page 2 is blank (no content stream).
+const sideDoc = await PDFDocument.load(await P.rotate(src, { angle: 90, pages: '1' }));
+sideDoc.removePage(2);
+sideDoc.insertPage(1, [400, 600]);
+const sideways = await sideDoc.save();
+const halves = await PDFDocument.load((await P.splitHalf(sideways, { mode: 'vertical' }))[0].bytes);
+// Left | Right of the spread as shown: turned clockwise, the stored bottom half is on the left. Each stays turned 90.
+assert.deepEqual(cropBox(halves, 0), [0, 0, 400, 300]);
+assert.deepEqual(cropBox(halves, 1), [0, 300, 400, 300]);
+assert.equal(halves.getPage(0).getRotation().angle, 90);
+// Redrawing tools keep sideways pages upright and cope with blank ones.
+const up = await PDFDocument.load(await P.cropResize(sideways, { mode: 'resize', size: 'A4' }));
+assert.deepEqual(Object.values(up.getPage(0).getSize()).map(Math.round), [842, 595]); // landscape, as shown
+assert.equal((await PDFDocument.load(await P.flip(sideways, { axis: 'h' }))).getPage(0).getRotation().angle, 90);
+assert.equal(await count(await P.nUp(sideways, { perSheet: '2' })), 3);
+assert.equal(await count(await P.pageNumbers(sideways, { position: 'left', format: 'of' })), 6);
+// 2 landscape pages per sheet stack on a portrait sheet rather than shrinking side by side.
+const land = await (async () => { const d = await PDFDocument.create(); d.addPage([800, 450]); d.addPage([800, 450]); return d.save(); })();
+assert.ok((await PDFDocument.load(await P.nUp(land, { perSheet: '2' }))).getPage(0).getHeight() > 800);
+// A page listed twice turns once.
+const twice = await PDFDocument.load(await P.rotate(src, { angle: 90, pages: '2, 1-2' }));
+assert.deepEqual(twice.getPages().slice(0, 2).map((p) => p.getRotation().angle), [90, 90]);
+// Text Helvetica can't write is folded or refused with a message, never a crash.
+assert.equal(P.winAnsi('Total ₹500 — “ok” ✓'), 'Total Rs. 500 - "ok" ');
+assert.equal(await count(await P.watermark(src, { text: 'PAID ₹ 👍' })), 6);
+await assert.rejects(P.watermark(src, { text: 'गोपनीय' }), /Latin/);
 assert.deepEqual((await P.pageInfo(src))[0], { width: 400, height: 600, rot: 0 });
 const z = P.zip([f(src), f(src)]);
 assert.equal(String.fromCharCode(z[0], z[1]), 'PK');

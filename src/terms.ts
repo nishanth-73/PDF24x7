@@ -2,7 +2,7 @@
 // again after an update, which is what the policy itself promises.
 import { File, Paths } from 'expo-file-system';
 
-export const TERMS_VERSION = 1;
+export const TERMS_VERSION = 2;
 export const TERMS_UPDATED = '22 September 2026';
 
 const stateFile = () => new File(Paths.document, 'consent.json');

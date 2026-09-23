@@ -54,18 +54,38 @@ export function byDay<T extends { modified: number }>(items: T[]) {
 // The screen's scroll view, shared so drag-to-reorder lists can auto-scroll it near the edges.
 const ScrollRef = createContext<AnimatedRef<Animated.ScrollView> | undefined>(undefined);
 
+// Something pinned over the bottom of the screen while the page scrolls under it (a selection bar), set from anywhere
+// inside the screen with useFloating.
+const FloatSlot = createContext<(node: ReactNode) => void>(() => {});
+const FLOAT_ROOM = 96; // page space kept free below the content, so the last row can scroll clear of the floating bar
+
 export function Screen({ children, edges = ['top'] }: { children: ReactNode; edges?: Edge[] }) {
   const s = useStyles();
   const ref = useAnimatedRef<Animated.ScrollView>();
+  const [float, setFloat] = useState<ReactNode>(null);
   return (
     <SafeAreaView edges={edges} style={s.root}>
-      <ScrollRef.Provider value={ref}>
-        <Animated.ScrollView ref={ref} contentContainerStyle={s.page} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-          {children}
-        </Animated.ScrollView>
-      </ScrollRef.Provider>
+      <FloatSlot.Provider value={setFloat}>
+        <ScrollRef.Provider value={ref}>
+          <Animated.ScrollView
+            ref={ref} contentContainerStyle={[s.page, !!float && { paddingBottom: FLOAT_ROOM }]} keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
+          >
+            {children}
+          </Animated.ScrollView>
+        </ScrollRef.Provider>
+      </FloatSlot.Provider>
+      {!!float && <View style={s.float} pointerEvents="box-none">{float}</View>}
     </SafeAreaView>
   );
+}
+
+// Pins `node` over the bottom of the enclosing Screen (null clears it). `deps` are what the node shows or acts on: the
+// slot only updates when they change, and a new node every render would re-render the screen every time.
+export function useFloating(node: ReactNode, deps: unknown[]) {
+  const set = useContext(FloatSlot);
+  useEffect(() => { set(node); }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => set(null), [set]);
 }
 
 export const swap = <T,>(arr: T[], a: number, b: number): T[] => {
@@ -373,9 +393,12 @@ export function PromptModal({
   submitLabel = 'Save',
   cancelLabel = 'Cancel',
   keyboardType,
+  onDismiss,
 }: {
   visible: boolean;
   onClose: () => void;
+  onDismiss?: () => void; // back, a tap outside or the ✕, when that shouldn't mean the same as the cancel button
+
   onSubmit: (val: string) => void;
   title: string;
   subtitle?: string;
@@ -406,7 +429,7 @@ export function PromptModal({
     // fires onShow. So autoFocus, and onShow itself, both ask a window that cannot raise the keyboard yet; focusing
     // has to wait for the window manager to apply the cleared flag, a frame or two later.
     <DialogModal
-      visible={visible} onClose={onClose} title={title} subtitle={subtitle}
+      visible={visible} onClose={onDismiss ?? onClose} title={title} subtitle={subtitle}
       onShow={() => setTimeout(() => input.current?.focus(), 120)}
     >
       <TextInput
@@ -481,6 +504,7 @@ export function Options({ defs, value, onChange }: { defs: OptDef[]; value: Opts
 const useStyles = makeStyles((c) => ({
   root: { flex: 1, backgroundColor: c.bg },
   page: { paddingHorizontal: 18, paddingTop: 2, paddingBottom: 48 },
+  float: { position: 'absolute', left: 12, right: 12, bottom: 12 },
   titleBlock: { marginTop: 2, marginBottom: 14 },
   largeTitle: { ...typo.largeTitle, color: c.ink },
   titleSub: { ...typo.small, color: c.sub, marginTop: 4 },

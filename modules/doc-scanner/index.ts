@@ -16,6 +16,7 @@ export type Processed = { uri: string; width: number; height: number; bg: string
 type Native = {
   detect(uri: string): Promise<Photo>;
   process(uri: string, options: ProcessOptions): Promise<Processed>;
+  autoCrop(uri: string): Promise<[number, number, number, number] | null>;
 };
 
 const native = requireNativeModule<Native>('DocScanner');
@@ -24,6 +25,8 @@ const native = requireNativeModule<Native>('DocScanner');
 export const detectPage = (uri: string) => native.detect(uri);
 /** Straightens, rotates, filters, adjusts and draws strokes, writing a JPEG. */
 export const processImage = (uri: string, options: ProcessOptions) => native.process(uri, options);
+/** What to keep of a rendered PDF page: [x, y, w, h] fractions, y from the top. Null when there's nothing to trim. */
+export const autoCropPage = (uri: string) => native.autoCrop(uri);
 
 export type DocCameraRef = { capture(): Promise<Photo> };
 export type DocCameraProps = ViewProps & {

@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import type { KeyboardTypeOptions } from 'react-native';
 import type { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as P from './pdf';
-import { ocrPdf, recompressJpeg, redactPdf, setPdfPassword } from '../modules/pdf-thumbnails';
+import { ocrPdf, pageTexts, recompressJpeg, redactPdf, setPdfPassword } from '../modules/pdf-thumbnails';
 import { readPicked } from './storage';
 
 export type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -27,6 +27,8 @@ export type Tool = {
   min?: number;
   noPreview?: boolean; // output isn't a PDF, or the editor already shows the result
   opts?: OptDef[];
+  // As a workflow step: its own title and options, and options fixed for it (there's no page to drag on in a step).
+  step?: { title: string; opts: OptDef[]; fixed: Opts };
   run: (inputs: P.Named[], opts: Opts) => Promise<Output[]>;
 };
 export type WorkflowStep = { id: string; op: string; opts: Opts };
@@ -73,22 +75,26 @@ const many = (fn: (bytes: Uint8Array, o: Opts) => Promise<P.Named[]>) => async (
 // Workflow steps are the tools themselves: multi-PDF tools combine every current file,
 // single-PDF tools run on each file. Excluded: camera input, custom editor, non-PDF output, and password (no step can
 // read the PDF after it).
-const NOT_STEPS = ['scan', 'workflow', 'organize', 'redact', 'zip', 'password'];
+const NOT_STEPS = ['scan', 'workflow', 'organize', 'redact', 'fillSign', 'zip', 'password'];
 export const stepTools = () => TOOLS.filter((t) => !NOT_STEPS.includes(t.id));
+export const stepTitle = (t: Tool) => t.step?.title ?? t.title;
+export const stepOpts = (t: Tool) => t.step?.opts ?? t.opts ?? [];
 
 async function runWorkflow(files: P.Named[], steps: WorkflowStep[]): Promise<Output[]> {
   if (!steps.length) throw new Error('Add at least one step.');
   let cur = files.map((f) => ({ name: f.name.replace(/\.pdf$/i, ''), bytes: f.bytes }));
   for (const step of steps) {
-    const t = toolById(step.op)!;
+    const t = toolById(step.op);
+    if (!t) throw new Error('A step in this workflow is no longer available. Remove it and try again.');
+    const opts = { ...step.opts, ...t.step?.fixed };
     if (t.input === 'pdfs') {
       const base = cur[0].name;
-      cur = (await t.run(cur, step.opts)).map((o) => ({ name: `${base}-${o.name}`, bytes: o.bytes }));
+      cur = (await t.run(cur, opts)).map((o) => ({ name: `${base}-${o.name}`, bytes: o.bytes }));
       continue;
     }
     const next: P.Named[] = [];
     for (const f of cur) { // one file at a time keeps memory flat
-      const outs = await t.run([f], step.opts);
+      const outs = await t.run([f], opts);
       next.push(...outs.map((o) => ({ name: outs.length > 1 ? `${f.name}-${o.name}` : f.name, bytes: o.bytes })));
     }
     cur = next;
@@ -127,7 +133,7 @@ export const TOOLS: Tool[] = [
   {
     id: 'compress', section: 4, input: 'pdf', cta: 'Compress PDF', doing: 'Recompressing images',
     title: 'Compress PDF',
-    desc: 'Reduce PDF file size by up to 70% while maintaining quality.',
+    desc: 'Shrink the photos and scans inside a PDF so the file gets much smaller. Text stays sharp.',
     opts: [O.quality],
     run: one('compressed', (b, o) => P.compress(b, o, recompressJpeg)), // JPEGs re-encoded natively, off the JS thread
   },
@@ -146,7 +152,7 @@ export const TOOLS: Tool[] = [
     title: 'Split PDF by Text',
     desc: 'Start a new file at every page containing a phrase you choose.',
     opts: [text('phrase', 'Start a new file at pages containing', '', 'e.g. Invoice No.')],
-    run: many(P.splitByText),
+    run: many((b, o) => P.splitByText(b, o, pageTexts)), // PdfBox reads the text, including the CID fonts most exporters use
   },
   {
     id: 'splitBookmarks', section: 1, input: 'pdf', cta: 'Split by bookmarks', doing: 'Reading bookmarks',
@@ -198,8 +204,9 @@ export const TOOLS: Tool[] = [
   {
     id: 'crop', section: 2, input: 'pdf', cta: 'Apply', doing: 'Resizing pages',
     title: 'Crop & Resize',
-    desc: 'Drag on each page to keep just the part you want, or resize every page to a standard size (A4, Letter).',
+    desc: 'Trim margins automatically or pull the corners in to keep just the part you want, or resize every page to a standard size (A4, Letter).',
     opts: CROP_OPTS,
+    step: { title: 'Resize pages', opts: [{ ...CROP_OPTS[1], when: undefined }], fixed: { mode: 'resize' } },
     run: one('resized', P.cropResize),
   },
   {
@@ -217,7 +224,11 @@ export const TOOLS: Tool[] = [
       if (!items.length) throw new Error('Add some text or a picture to a page first.');
       const images: Record<string, Uint8Array> = {};
       for (const it of items) {
-        if (it.kind === 'image' && !images[it.uri]) images[it.uri] = await readPicked(it.uri);
+        if (it.kind !== 'image' || images[it.uri]) continue;
+        // A resumed draft can point at a picture the OS has since cleared from the picker's cache.
+        images[it.uri] = await readPicked(it.uri).catch(() => {
+          throw new Error(`A picture you added on page ${it.page + 1} is no longer available. Remove it and add it again.`);
+        });
       }
       return P.fillSign(bytes, items, images);
     }),

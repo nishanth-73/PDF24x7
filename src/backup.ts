@@ -1,8 +1,10 @@
 // Two-way Google Drive sync for the app's saved PDFs, run whenever a file changes.
-// The phone's "PDF Tools" folder (files plus one level of folders) is kept identical to a "PDF Tools" folder in the user's
-// Drive: new files, edits, renames, moves, folders and deletions go both ways. Uses the drive.file scope, so the app only
-// sees what it created. Each run is a three-way compare of phone, Drive and the state after the last successful sync.
+// Everything saved on the phone goes up to a "PDF Tools" folder in the user's Drive (files plus one level of folders),
+// and edits, renames, moves and deletions of files on both sides go both ways. Files that are only in Drive stay there
+// until the user downloads them (downloadToPhone), so the app never fills the phone on its own. Uses the drive.file
+// scope, so the app only sees what it created. Each run is a three-way compare of phone, Drive and the last sync.
 import { Directory, File, Paths } from 'expo-file-system';
+import { downloadAsync } from 'expo-file-system/legacy';
 import { chooseGoogleAccount, clearDriveToken, getDriveToken } from '../modules/google-auth';
 import { setFileModified } from '../modules/pdf-thumbnails';
 
@@ -64,6 +66,22 @@ class DriveError extends Error {
   }
 }
 
+const NETWORK = /network request failed|timeout|timed out|unknownhost|unable to resolve|failed to connect|connection|socket/i;
+const isNetworkError = (e: unknown) => !(e instanceof DriveError) && NETWORK.test(e instanceof Error ? e.message : String(e));
+
+// File transfers get three tries: on a patchy connection one stalled download used to fail the whole sync, and the next
+// sync started with that same download, so it never got past it.
+async function retry<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= 3 || !isNetworkError(e)) throw e;
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
+}
+
 async function call(token: string, url: string, init: RequestInit = {}) {
   const res = await fetch(url, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...init.headers } });
   const text = await res.text();
@@ -113,9 +131,9 @@ async function uploadToDrive(token: string, file: File, name: string, parent: st
   if (!id) {
     id = (await call(token, `${API}/files?fields=id`, { method: 'POST', body: JSON.stringify({ name, parents: [parent], mimeType }) })).id as string;
   }
-  const res = await file.upload(`${UPLOAD}/files/${id}?uploadType=media&fields=id,modifiedTime,size`, {
+  const res = await retry(() => file.upload(`${UPLOAD}/files/${id}?uploadType=media&fields=id,modifiedTime,size`, {
     httpMethod: 'PATCH', mimeType, headers: { Authorization: `Bearer ${token}`, 'Content-Type': mimeType },
-  });
+  }));
   if (res.status < 200 || res.status >= 300) throw new DriveError(res.status, res.body);
   const meta = JSON.parse(res.body);
   return { id: meta.id as string, driveModified: meta.modifiedTime as string };
@@ -126,7 +144,13 @@ async function downloadFromDrive(token: string, id: string, dest: File, modified
   const dir = dest.parentDirectory;
   if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
   const tmp = new File(Paths.cache, `drive-${id}.part`);
-  await File.downloadFileAsync(`${API}/files/${id}?alt=media`, tmp, { headers: { Authorization: `Bearer ${token}` }, idempotent: true });
+  // The legacy downloader: File.downloadFileAsync's client gives up after 10 s without data, which a multi-MB PDF on a
+  // slow connection hits; this one waits 60 s.
+  const res = await retry(() => downloadAsync(`${API}/files/${id}?alt=media`, tmp.uri, { headers: { Authorization: `Bearer ${token}` } }));
+  if (res.status < 200 || res.status >= 300) { // the error body was written in place of the PDF
+    if (tmp.exists) tmp.delete();
+    throw new DriveError(res.status, '');
+  }
   if (dest.exists) dest.delete(); // only replaced once the download fully succeeded
   tmp.moveSync(dest);
   if (modified) setFileModified(dest.uri, Date.parse(modified));
@@ -139,11 +163,10 @@ export function describeDriveError(e: unknown): string {
     if (e.status === 403 || e.status === 429) return 'Google Drive is limiting requests right now. Sync will try again later.';
     return `Google Drive had a problem (error ${e.status}). Sync will try again later.`;
   }
-  const msg = e instanceof Error ? e.message : String(e);
-  if (/network request failed|timeout|timed out|unknownhost|unable to resolve|failed to connect|connection|socket/i.test(msg)) {
+  if (isNetworkError(e)) {
     return 'Couldn’t reach Google Drive. Check your connection; sync tries again when you open Files or save a file.';
   }
-  return msg; // our own messages, like PDFs missing from Drive, are already readable
+  return e instanceof Error ? e.message : String(e); // our own messages, like PDFs missing from Drive, are already readable
 }
 
 // ── Local side ──────────────────────────────────────────────────────────────
@@ -227,6 +250,7 @@ async function syncOnce() {
     await withToken(email, (token) => reconcile(token, email, mine));
     mine((x) => ({ ...x, lastSync: Date.now(), error: undefined }));
   } catch (e) {
+    console.warn('Drive sync failed:', e instanceof Error ? `${e.message}\n${e.stack}` : e); // the words shown are simplified; logcat keeps the cause
     mine((x) => ({ ...x, error: describeDriveError(e) }));
   }
 }
@@ -273,7 +297,8 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
   }
   const local = scanLocal();
 
-  // Folders: create what's missing on either side; a folder deleted on one side goes once it's empty on the other.
+  // Folders: a new one on the phone is made in Drive too; one only in Drive stays there, and appears on the phone when
+  // a file in it is downloaded. A folder deleted on one side goes once it's empty on the other.
   for (const folder of new Set([...local.folders, ...remoteFolders.keys(), ...Object.keys(syncedFolders)])) {
     const onPhone = local.folders.has(folder);
     const inDrive = remoteFolders.has(folder);
@@ -282,10 +307,6 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
       const id = await createFolderInDrive(token, rootId, folder);
       remoteFolders.set(folder, id);
       syncedFolders[folder] = id;
-    } else if (!onPhone && inDrive && !known) {
-      new Directory(localRoot(), folder).create({ intermediates: true, idempotent: true });
-      local.folders.add(folder);
-      syncedFolders[folder] = remoteFolders.get(folder)!;
     } else if (onPhone && inDrive) {
       syncedFolders[folder] = remoteFolders.get(folder)!;
     }
@@ -305,6 +326,8 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
   };
   const record = (rel: string, id: string, driveModified: string, file: File) => {
     entries[rel] = { id, driveModified, localModified: file.lastModified ?? 0, size: file.size ?? 0 };
+    const prev = remote.get(rel); // kept current, so the listing this run leaves behind matches Drive
+    remote.set(rel, { id, size: file.size ?? 0, md5: prev?.md5, modified: driveModified, parent: prev?.parent ?? '' });
     save();
   };
   const localChanged = (rel: string) => {
@@ -414,12 +437,13 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
         record(rel, r.id, r.modified, localFile(rel));
       } else {
         await trashInDrive(token, r.id);
+        remote.delete(rel);
         delete entries[rel];
         save();
       }
-    } else if (!l && r && !e) { // new in Drive
-      await downloadFromDrive(token, r.id, localFile(rel), r.modified);
-      record(rel, r.id, r.modified, localFile(rel));
+    } else if (!l && r && !e) { // new in Drive: stays there until it's downloaded from Files → Google Drive
+      driveOnly[rel] = true;
+      save();
     } else { // gone from both sides
       delete entries[rel];
       save();
@@ -439,12 +463,17 @@ async function reconcile(token: string, email: string, mine: (fn: (x: BackupStat
       const driveHasFiles = [...Object.keys(entries), ...Object.keys(driveOnly)].some((rel) => split(rel)[0] === folder);
       if (!driveHasFiles) {
         await trashInDrive(token, id);
+        remoteFolders.delete(folder);
         delete syncedFolders[folder];
       }
     } else if (!onPhone && !inDrive) {
       delete syncedFolders[folder];
     }
   }
+  remember(email, {
+    folders: [...remoteFolders.keys()],
+    files: [...remote].map(([rel, r]) => driveFile(r.id, split(rel)[1], split(rel)[0], r.size, r.modified)),
+  });
   if (!allowDriveDeletes) {
     throw new Error(`${missingInDrive.length} PDFs are missing from Google Drive, so they were kept on this phone. ` +
       'Restore them from Drive\'s Trash, or delete them here to finish syncing.');
@@ -518,14 +547,38 @@ export function keepInDriveOnly(uris: string[]) {
   });
 }
 
-/** Brings a Drive-only file back onto this phone on the next sync. */
-export function restoreToPhone(f: DriveFile) {
-  const rel = f.folder ? `${f.folder}/${f.name}` : f.name;
-  update((x) => { const driveOnly = { ...x.driveOnly }; delete driveOnly[rel]; return { ...x, driveOnly }; });
-  syncNow();
-}
+const relOfDrive = (f: DriveFile) => (f.folder ? `${f.folder}/${f.name}` : f.name);
 
-export const isDriveOnly = (s: BackupState, f: DriveFile) => !!s.driveOnly[f.folder ? `${f.folder}/${f.name}` : f.name];
+/** Whether this Drive file also has its synced copy on this phone. */
+export const isOnPhone = (s: BackupState, f: DriveFile) => !!s.entries[relOfDrive(f)];
+
+/**
+ * Downloads Drive files onto this phone, into the folder they're in in Drive, and links them so they sync from then on.
+ * Sync never downloads on its own, so the phone only holds the files you chose. `onProgress` gets the count done.
+ */
+export async function downloadToPhone(files: DriveFile[], onProgress?: (done: number) => void) {
+  const s = readBackup();
+  if (!s.enabled || !s.email) throw new Error('Google Drive sync is off.');
+  const email = s.email;
+  await running?.catch(() => {}); // a sync mid-run would write back its older view of these files
+  await withToken(email, async (token) => {
+    for (const [n, f] of files.entries()) {
+      const rel = relOfDrive(f);
+      const dest = localFile(rel);
+      if (!dest.exists) { // one already here (linked, or not yet) is left to sync
+        await downloadFromDrive(token, f.id, dest, f.modifiedTime);
+        update((x) => {
+          if (x.email !== email) return x;
+          const driveOnly = { ...x.driveOnly };
+          delete driveOnly[rel];
+          const entry = { id: f.id, driveModified: f.modifiedTime, localModified: dest.lastModified ?? 0, size: dest.size ?? 0 };
+          return { ...x, driveOnly, entries: { ...x.entries, [rel]: entry } };
+        });
+      }
+      onProgress?.(n + 1);
+    }
+  });
+}
 
 /** Sync status of a saved file, for labels in Files. */
 export function syncLabel(s: BackupState, uri: string, name: string): string {
@@ -535,29 +588,50 @@ export function syncLabel(s: BackupState, uri: string, name: string): string {
 
 // ── Browsing Drive (Files → Google Drive) ───────────────────────────────────
 
-export type DriveFile = { id: string; name: string; folder: string; size: number; modified: number };
+export type DriveFile = { id: string; name: string; folder: string; size: number; modified: number; modifiedTime: string };
+export type DriveListing = { folders: string[]; files: DriveFile[] };
+
+const driveFile = (id: string, name: string, folder: string, size: number | string | undefined, modifiedTime: string): DriveFile =>
+  ({ id, name, folder, size: Number(size ?? 0), modified: Date.parse(modifiedTime), modifiedTime });
+
+// The last listing of the Drive folder, from a sync or a browse: the Drive tab and pickers show it straight away instead
+// of fetching again on every visit, and each sync (which lists Drive anyway) keeps it current.
+let listing: { email: string; data: DriveListing } | null = null;
+function remember(email: string, data: DriveListing) {
+  listing = {
+    email,
+    data: {
+      folders: [...new Set(data.folders)].sort((a, b) => a.localeCompare(b)),
+      files: [...data.files].sort((a, b) => b.modified - a.modified),
+    },
+  };
+}
+export function cachedDriveFiles(): DriveListing | null {
+  const s = readBackup();
+  return listing && s.enabled && listing.email === s.email ? listing.data : null;
+}
 
 /** Folders and PDFs in the synced Drive folder (one level of folders, like the phone), files newest first. */
-export async function listDriveFiles(): Promise<{ folders: string[]; files: DriveFile[] }> {
+export async function listDriveFiles(): Promise<DriveListing> {
   const s = readBackup();
   if (!s.enabled || !s.email) throw new Error('Google Drive sync is off.');
-  return withToken(s.email, async (token) => {
+  const email = s.email;
+  return withToken(email, async (token) => {
     const rootId = await ensureRoot(token, s.folderId);
-    const out: DriveFile[] = [];
+    const files: DriveFile[] = [];
     const folders: string[] = [];
     for (const item of await listChildren(token, rootId)) {
       if (item.mimeType === FOLDER_MIME) {
         folders.push(item.name);
         for (const f of await listChildren(token, item.id)) {
-          if (f.mimeType !== FOLDER_MIME && isPdf(f.name)) {
-            out.push({ id: f.id, name: f.name, folder: item.name, size: Number(f.size ?? 0), modified: Date.parse(f.modifiedTime) });
-          }
+          if (f.mimeType !== FOLDER_MIME && isPdf(f.name)) files.push(driveFile(f.id, f.name, item.name, f.size, f.modifiedTime));
         }
       } else if (isPdf(item.name)) {
-        out.push({ id: item.id, name: item.name, folder: '', size: Number(item.size ?? 0), modified: Date.parse(item.modifiedTime) });
+        files.push(driveFile(item.id, item.name, '', item.size, item.modifiedTime));
       }
     }
-    return { folders: [...new Set(folders)].sort((a, b) => a.localeCompare(b)), files: out.sort((a, b) => b.modified - a.modified) };
+    remember(email, { folders, files });
+    return listing!.data;
   });
 }
 
@@ -568,13 +642,14 @@ export async function saveCopyToDrive(f: { name: string; uri: string }, mimeType
   await withToken(s.email, async (token) => uploadToDrive(token, new File(f.uri), f.name, await ensureRoot(token, s.folderId), undefined, mimeType));
 }
 
-/** A temporary local copy of a Drive file, for opening or sharing. */
-export async function downloadDriveFile(f: DriveFile): Promise<{ name: string; uri: string }> {
+/** A temporary local copy of a Drive file (in the cache, which Android may clear), for opening, sharing or a tool. */
+export async function downloadDriveFile(f: DriveFile): Promise<{ name: string; uri: string; size: number }> {
   const s = readBackup();
   if (!s.enabled || !s.email) throw new Error('Google Drive sync is off.');
   return withToken(s.email, async (token) => {
-    const dest = new File(Paths.cache, 'drive', f.name.replace(/[\\/:*?"<>|]+/g, '_'));
-    await downloadFromDrive(token, f.id, dest);
-    return { name: f.name, uri: dest.uri };
+    // Under its id, so same-named files from different folders don't overwrite each other.
+    const dest = new File(Paths.cache, 'drive', f.id, f.name.replace(/[\\/:*?"<>|]+/g, '_'));
+    if (!dest.exists || dest.size !== f.size) await downloadFromDrive(token, f.id, dest);
+    return { name: f.name, uri: dest.uri, size: dest.size ?? f.size };
   });
 }

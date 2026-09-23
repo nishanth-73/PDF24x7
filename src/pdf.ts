@@ -3,7 +3,7 @@ import {
   PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFStream, PDFString,
   ParseSpeeds, StandardFontEmbedder, StandardFonts, decodePDFRawStream, degrees, rgb,
 } from 'pdf-lib';
-import type { PDFImage, PDFObject, PDFPage } from 'pdf-lib';
+import type { PDFEmbeddedPage, PDFImage, PDFObject, PDFPage } from 'pdf-lib';
 import { zipSync } from 'fflate';
 
 export type Named = { name: string; bytes: Uint8Array };
@@ -17,6 +17,27 @@ const A4: [number, number] = [595.28, 841.89];
 export const SIZES = { A4, A5: [419.53, 595.28], Letter: [612, 792], Legal: [612, 1008] } satisfies Record<string, [number, number]>;
 export type PaperSize = keyof typeof SIZES;
 const range = (n: number, from = 0) => Array.from({ length: Math.max(0, n) }, (_, i) => from + i);
+const rotOf = (p: PDFPage) => ((p.getRotation().angle % 360) + 360) % 360; // /Rotate as 0, 90, 180 or 270
+
+// Pages redrawn onto new sheets (flip, n-up, resize) are embedded at their crop box, which is what viewers show, and
+// given an empty content stream when they have none: pdf-lib refuses to embed a page without one, and blank pages are
+// common in scans.
+function embedShown(out: PDFDocument, pages: PDFPage[]) {
+  for (const p of pages) if (!p.node.Contents()) p.node.addContentStream(p.doc.context.register(p.doc.context.contentStream([])));
+  return out.embedPages(pages, pages.map((p) => {
+    const b = p.getCropBox();
+    return { left: b.x, bottom: b.y, right: b.x + b.width, top: b.y + b.height };
+  }));
+}
+// The size of an embedded page as a viewer shows it, turned by the source page's /Rotate.
+const shownSize = (e: PDFEmbeddedPage, rot: number) => (rot % 180 ? [e.height, e.width] : [e.width, e.height]);
+// Draws an embedded page upright as a viewer would show it (turned clockwise by `rot`), scaled by `s`, its lower-left
+// corner at (x, y).
+function drawShown(page: PDFPage, e: PDFEmbeddedPage, rot: number, x: number, y: number, s: number) {
+  const [w, h] = [e.width * s, e.height * s];
+  const [ox, oy] = rot === 90 ? [x, y + w] : rot === 180 ? [x + w, y + h] : rot === 270 ? [x + h, y] : [x, y];
+  page.drawPage(e, { x: ox, y: oy, xScale: s, yScale: s, rotate: degrees(-rot) });
+}
 
 // pdf-lib pauses on a setTimeout every 100 objects read and 50 written by default; big PDFs spent seconds just waiting.
 // ponytail: ~1500 objects between pauses keeps the JS thread breathing; raise it if runs still feel slow.
@@ -72,22 +93,47 @@ export async function alternate(files: Named[], { reverse = false }: { reverse?:
   return save(out);
 }
 
-// JPEG in, smaller RGB JPEG out (null to keep the original). The app passes the native encoder; the Node check, jpeg-js.
-export type RecodeJpeg = (jpeg: Uint8Array, quality: number) => Promise<Uint8Array | null>;
+// JPEG in, smaller RGB JPEG out, its long side at most `maxSide` px (0 keeps the size); null keeps the original.
+// The app passes the native encoder; the Node check, jpeg-js.
+export type RecodeJpeg = (jpeg: Uint8Array, quality: number, maxSide: number) => Promise<Uint8Array | null>;
 
-// Re-encodes embedded JPEG photos/scans (where the bulk of a PDF's size lives),
-// drops XMP metadata and packs objects into compressed object streams.
+// A JPEG's [width, height], read from its frame header.
+export function jpegSize(b: Uint8Array): [number, number] | null {
+  for (let i = 2; i + 8 < b.length;) {
+    if (b[i] !== 0xff) return null;
+    const m = b[i + 1];
+    if (m === 0xff) { i++; continue; } // fill byte
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return [(b[i + 7] << 8) | b[i + 8], (b[i + 5] << 8) | b[i + 6]];
+    i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+  }
+  return null;
+}
+
+// Longest side each level shrinks a photo to: about 200 dpi on an A4 page for Balanced, 130 for Strong.
+const MAX_SIDE: Record<string, number> = { 80: 0, 60: 2400, 35: 1600 };
+
+// Re-encodes embedded JPEG photos/scans (where the bulk of a PDF's size lives), shrinking oversized ones,
+// drops XMP metadata and packs objects into compressed object streams. Never returns a bigger file than it was given.
 export async function compress(bytes: Uint8Array, { quality = 60 }: { quality?: Num } = {}, recode: RecodeJpeg) {
   const doc = await load(bytes);
+  const dct = N('DCTDecode');
   for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
     if (!(obj instanceof PDFRawStream)) continue;
     const d = obj.dict;
-    if (d.get(N('Subtype')) !== N('Image') || d.get(N('Filter')) !== N('DCTDecode')) continue;
+    const filter = d.get(N('Filter'));
+    const isJpeg = filter === dct || (filter instanceof PDFArray && filter.size() === 1 && filter.get(0) === dct);
+    if (d.get(N('Subtype')) !== N('Image') || !isJpeg) continue;
     try {
-      const out = await recode(obj.contents, Number(quality));
-      if (!out || out.length >= obj.contents.length) continue;
+      const out = await recode(obj.contents, Number(quality), MAX_SIDE[String(quality)] ?? 0);
+      const size = out && jpegSize(out);
+      if (!out || !size || out.length >= obj.contents.length) continue;
+      d.set(N('Filter'), dct);
       d.set(N('ColorSpace'), N('DeviceRGB'));
+      d.set(N('BitsPerComponent'), PDFNumber.of(8));
+      d.set(N('Width'), PDFNumber.of(size[0]));
+      d.set(N('Height'), PDFNumber.of(size[1]));
       d.delete(N('Decode'));
+      d.delete(N('DecodeParms')); // a ColorTransform meant for the old JPEG would skew the new one's colours
       d.set(N('Length'), PDFNumber.of(out.length));
       doc.context.assign(ref, PDFRawStream.of(d, out));
     } catch {
@@ -95,7 +141,8 @@ export async function compress(bytes: Uint8Array, { quality = 60 }: { quality?: 
     }
   }
   doc.catalog.delete(N('Metadata'));
-  return save(doc, { useObjectStreams: true });
+  const out = await save(doc, { useObjectStreams: true });
+  return out.length < bytes.length ? out : bytes;
 }
 
 export async function split(bytes: Uint8Array, { mode = 'every', ranges = '' }: { mode?: string; ranges?: string } = {}) {
@@ -123,8 +170,8 @@ const hexBytes = (h: string) => {
 };
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, '');
 
-// ponytail: naive text scan of content-stream strings. Works for simple/WinAnsi fonts;
-// CID (Identity-H) fonts and scans yield nothing. Upgrade: pdf.js text layer.
+// Naive text scan of content-stream strings: works for simple/WinAnsi fonts, while CID (Identity-H) fonts and scans
+// yield nothing. The app reads text with PdfBox instead; this is the fallback the Node check runs on.
 function pageText(page: PDFPage): string {
   const c = page.node.Contents();
   const ctx = page.doc.context;
@@ -138,45 +185,25 @@ function pageText(page: PDFPage): string {
   }).join(' ');
 }
 
-export type PageTextResult = { pageIndex: number; text: string };
+// Each page's text, in page order.
+export type ReadTexts = (bytes: Uint8Array) => Promise<string[]>;
+export const naivePageTexts: ReadTexts = async (bytes) =>
+  (await load(bytes)).getPages().map((p) => { try { return pageText(p); } catch { return ''; } });
 
-export async function extractAllText(bytes: Uint8Array): Promise<PageTextResult[]> {
-  try {
-    const doc = await load(bytes);
-    const pages = doc.getPages();
-    const results: PageTextResult[] = [];
-    for (let i = 0; i < pages.length; i++) {
-      if (i > 0 && i % 5 === 0) {
-        await new Promise((r) => setTimeout(r, 0));
-      }
-      let t = '';
-      try {
-        t = pageText(pages[i])
-          .replace(/[ \t]+/g, ' ')
-          .replace(/\n\s*\n\s*/g, '\n\n')
-          .trim();
-      } catch {}
-      results.push({ pageIndex: i, text: t });
-    }
-    return results;
-  } catch {
-    return [];
-  }
-}
-
-export async function splitByText(bytes: Uint8Array, { phrase = '' }: { phrase?: string } = {}) {
+export async function splitByText(bytes: Uint8Array, { phrase = '' }: { phrase?: string } = {}, read: ReadTexts = naivePageTexts) {
   const needle = norm(phrase);
   if (!needle) throw new Error('Enter the phrase to split at.');
   const src = await load(bytes);
+  const texts = await read(bytes);
   const groups: number[][] = [];
   let hits = 0;
-  src.getPages().forEach((p, i) => {
-    const hit = norm(pageText(p)).includes(needle);
+  src.getPageIndices().forEach((i) => {
+    const hit = norm(texts[i] ?? '').includes(needle);
     if (hit) hits++;
     if (!groups.length || (hit && groups[groups.length - 1].length)) groups.push([]);
     groups[groups.length - 1].push(i);
   });
-  if (!hits) throw new Error(`"${phrase}" wasn't found. Scanned PDFs have no searchable text.`);
+  if (!hits) throw new Error(`"${phrase}" wasn't found on any page. If this is a scan, run OCR Scanned PDF on it first.`);
   return Promise.all(groups.map(async (g, k): Promise<Named> => ({ name: `part-${k + 1}`, bytes: await pick(src, g) })));
 }
 
@@ -240,13 +267,20 @@ export async function splitHalf(bytes: Uint8Array, { mode = 'file' }: { mode?: s
     ];
   }
   const out = await PDFDocument.create();
+  // Halves of the page as displayed (left then right, or top then bottom), turned back into the page as stored, so a
+  // spread saved sideways with /Rotate still splits into its two pages.
+  const shown: Box[] = mode === 'vertical' ? [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]] : [[0, 0, 1, 0.5], [0, 0.5, 1, 0.5]];
   for (const i of src.getPageIndices()) {
     const halves = await out.copyPages(src, [i, i]);
-    const { x, y, width: w, height: h } = halves[0].getCropBox();
-    const boxes: Box[] = mode === 'vertical'
-      ? [[x, y, w / 2, h], [x + w / 2, y, w / 2, h]]
-      : [[x, y + h / 2, w, h / 2], [x, y, w, h / 2]];
-    halves.forEach((p, k) => { p.setMediaBox(...boxes[k]); p.setCropBox(...boxes[k]); out.addPage(p); });
+    const cb = halves[0].getCropBox();
+    const rot = rotOf(halves[0]);
+    halves.forEach((p, k) => {
+      const [x, y, w, h] = unrotate(shown[k], rot);
+      const box: Box = [cb.x + x * cb.width, cb.y + y * cb.height, w * cb.width, h * cb.height];
+      p.setMediaBox(...box);
+      p.setCropBox(...box);
+      out.addPage(p);
+    });
   }
   return [{ name: 'sliced', bytes: await save(out) }];
 }
@@ -276,7 +310,7 @@ export async function splitBySize(bytes: Uint8Array, { maxMB = 5 }: { maxMB?: Nu
 
 export async function rotate(bytes: Uint8Array, { angle = 90, pages = '' }: { angle?: Num; pages?: string } = {}) {
   const doc = await load(bytes);
-  const sel = pages.trim() ? parseRanges(pages, doc.getPageCount()).flat() : doc.getPageIndices();
+  const sel = pages.trim() ? [...new Set(parseRanges(pages, doc.getPageCount()).flat())] :doc.getPageIndices(); // a page listed twice turns once
   sel.forEach((i) => {
     const p = doc.getPage(i);
     p.setRotation(degrees((p.getRotation().angle + Number(angle)) % 360));
@@ -284,16 +318,18 @@ export async function rotate(bytes: Uint8Array, { angle = 90, pages = '' }: { an
   return save(doc);
 }
 
-// ponytail: flip / n-up / resize redraw pages via embedPage, which ignores a page's /Rotate.
 export async function flip(bytes: Uint8Array, { axis = 'h' }: { axis?: string } = {}) {
   const src = await load(bytes);
+  const pages = src.getPages();
   const out = await PDFDocument.create();
-  const fx = axis !== 'v';
-  const fy = axis !== 'h';
-  (await out.embedPages(src.getPages())).forEach((e) => {
-    out.addPage([e.width, e.height]).drawPage(e, {
-      x: fx ? e.width : 0, y: fy ? e.height : 0, xScale: fx ? -1 : 1, yScale: fy ? -1 : 1,
-    });
+  (await embedShown(out, pages)).forEach((e, i) => {
+    // The page keeps its /Rotate, so mirroring it as displayed means the other axis of a page turned a quarter.
+    const rot = rotOf(pages[i]);
+    const fx = rot % 180 ? axis !== 'h' : axis !== 'v';
+    const fy = rot % 180 ? axis !== 'v' : axis !== 'h';
+    const p = out.addPage([e.width, e.height]);
+    p.drawPage(e, { x: fx ? e.width : 0, y: fy ? e.height : 0, xScale: fx ? -1 : 1, yScale: fy ? -1 : 1 });
+    p.setRotation(degrees(rot));
   });
   return save(out);
 }
@@ -302,14 +338,22 @@ const GRID: Record<string, [cols: number, rows: number]> = { 2: [2, 1], 4: [2, 2
 export async function nUp(bytes: Uint8Array, { perSheet = 4, lines = false }: { perSheet?: Num; lines?: boolean } = {}) {
   const grid = GRID[String(perSheet)];
   if (!grid) throw new Error('Choose 2, 4, 6, 9 or 16 pages per sheet.');
-  const [cols, rows] = grid;
-  const [W, H] = cols > rows ? [A4[1], A4[0]] : A4;
   const src = await load(bytes);
+  const pages = src.getPages();
   const out = await PDFDocument.create();
+  const embedded = await embedShown(out, pages);
   const m = 18;
+  // The grid as given on its natural sheet, or turned with the sheet turned too (2 slides stack on a portrait sheet);
+  // whichever shows the first page bigger.
+  const [c0, r0] = grid;
+  const landscape: [number, number] = [A4[1], A4[0]];
+  const [w0, h0] = shownSize(embedded[0], rotOf(pages[0]));
+  const layouts = [[c0, r0, ...(c0 > r0 ? landscape : A4)], [r0, c0, ...(c0 > r0 ? A4 : landscape)]];
+  const fit = ([c, r, W, H]: number[]) => Math.min((W - m * 2) / c / w0, (H - m * 2) / r / h0);
+  const [cols, rows, W, H] = fit(layouts[1]) > fit(layouts[0]) ? layouts[1] : layouts[0];
   const cw = (W - m * 2) / cols;
   const ch = (H - m * 2) / rows;
-  (await out.embedPages(src.getPages())).forEach((e, i) => {
+  embedded.forEach((e, i) => {
     const k = i % (cols * rows);
     const sheet = k === 0 ? out.addPage([W, H]) : out.getPage(out.getPageCount() - 1);
     if (k === 0 && lines) { // hairline dividers in the gaps between cells
@@ -317,14 +361,12 @@ export async function nUp(bytes: Uint8Array, { perSheet = 4, lines = false }: { 
       for (let c = 1; c < cols; c++) sheet.drawLine({ start: { x: m + c * cw, y: m }, end: { x: m + c * cw, y: H - m }, ...line });
       for (let r = 1; r < rows; r++) sheet.drawLine({ start: { x: m, y: H - m - r * ch }, end: { x: W - m, y: H - m - r * ch }, ...line });
     }
-    const s = Math.min((cw - 8) / e.width, (ch - 8) / e.height);
+    const rot = rotOf(pages[i]);
+    const [w, h] = shownSize(e, rot);
+    const s = Math.min((cw - 8) / w, (ch - 8) / h);
     const col = k % cols;
     const row = Math.floor(k / cols);
-    sheet.drawPage(e, {
-      x: m + col * cw + (cw - e.width * s) / 2,
-      y: H - m - (row + 1) * ch + (ch - e.height * s) / 2,
-      xScale: s, yScale: s,
-    });
+    drawShown(sheet, e, rot, m + col * cw + (cw - w * s) / 2, H - m - (row + 1) * ch + (ch - h * s) / 2, s);
   });
   return save(out);
 }
@@ -362,9 +404,9 @@ export function placeOnPage(rect: Box, rot: number, W: number, H: number) {
 }
 
 // The standard fonts are WinAnsi, so a character they cannot write is folded to its plain form or dropped, rather
-// than failing the whole document.
-const winAnsi = (s: string) => s
-  .replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-')
+// than failing the whole document. Editors show text through this too, so what you see is what the PDF gets.
+export const winAnsi = (s: string) => s
+  .replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/₹\s?/g, 'Rs. ')
   .replace(/[^\x20-\x7E\xA0-\xFF]/g, '');
 
 const DESCENT = 0.79; // Helvetica sits about a fifth of its size below the baseline
@@ -377,13 +419,15 @@ export async function fillSign(bytes: Uint8Array, items: SignItem[], images: Rec
   for (const it of items) {
     const p = pages[it.page];
     if (!p) continue;
-    const rot = ((p.getRotation().angle % 360) + 360) % 360;
+    const rot = rotOf(p);
     const { width: W, height: H } = p.getSize();
     if (it.kind === 'image') {
       if (!embedded[it.uri]) {
         const b = images[it.uri];
         if (!b) continue;
-        embedded[it.uri] = b[0] === 0x89 ? await doc.embedPng(b) : await doc.embedJpg(b);
+        if (b[0] === 0x89) embedded[it.uri] = await doc.embedPng(b);
+        else if (b[0] === 0xff && b[1] === 0xd8) embedded[it.uri] = await doc.embedJpg(b);
+        else throw new Error(`The picture on page ${it.page + 1} isn't a JPEG or PNG. Pick a different one.`);
       }
       const at = placeOnPage([it.x, it.y, it.w, it.h], rot, W, H);
       p.drawImage(embedded[it.uri], { x: at.x, y: at.y, width: at.w, height: at.h, rotate: degrees(rot) });
@@ -407,12 +451,12 @@ export async function cropResize(
 ) {
   const src = await load(bytes);
   if (mode === 'crop') {
-    if (!Object.keys(boxes).length) throw new Error('Drag across a page to choose what to keep.');
+    if (!Object.keys(boxes).length) throw new Error('Pull a page’s corners in, or tap Auto crop, to choose what to keep.');
     src.getPages().forEach((p, i) => {
       const box = boxes[i];
       if (!box) return; // pages you didn't crop are left at their full size
       const cb = p.getCropBox();
-      const [x, y, w, h] = unrotate(box, ((p.getRotation().angle % 360) + 360) % 360);
+      const [x, y, w, h] = unrotate(box, rotOf(p));
       if (w * cb.width < 1 || h * cb.height < 1) throw new Error(`The crop on page ${i + 1} is too small.`);
       p.setCropBox(cb.x + x * cb.width, cb.y + y * cb.height, w * cb.width, h * cb.height);
     });
@@ -420,15 +464,19 @@ export async function cropResize(
   }
   const [a, b] = SIZES[size as PaperSize] ?? A4;
   const out = await PDFDocument.create();
-  (await out.embedPages(src.getPages())).forEach((e) => {
-    const [W, H] = e.width > e.height ? [b, a] : [a, b];
-    const s = Math.min(W / e.width, H / e.height);
-    out.addPage([W, H]).drawPage(e, { x: (W - e.width * s) / 2, y: (H - e.height * s) / 2, xScale: s, yScale: s });
+  const pages = src.getPages();
+  (await embedShown(out, pages)).forEach((e, i) => {
+    const rot = rotOf(pages[i]);
+    const [w, h] = shownSize(e, rot);
+    const [W, H] = w > h ? [b, a] : [a, b];
+    const s = Math.min(W / w, H / h);
+    drawShown(out.addPage([W, H]), e, rot, (W - w * s) / 2, (H - h * s) / 2, s);
   });
   return save(out);
 }
 
-// Diagonal watermark geometry in page points; the tool preview uses it too so both match.
+// Diagonal watermark geometry in page points; the tool preview uses it too so both match. `text` must already be
+// through winAnsi(): Helvetica can't measure (or write) anything else.
 export function watermarkLayout(text: string, width: number, height: number, scale: Num = 1) {
   const w1 = StandardFontEmbedder.for(StandardFonts.HelveticaBold as unknown as Parameters<typeof StandardFontEmbedder.for>[0]).widthOfTextAtSize(text, 1);
   const k = Number(scale) || 1;
@@ -436,8 +484,10 @@ export function watermarkLayout(text: string, width: number, height: number, sca
   return { angle: Math.atan2(height, width), size, textWidth: w1 * size };
 }
 
-export async function watermark(bytes: Uint8Array, { text = 'CONFIDENTIAL', opacity = 0.15, scale = 1 }: { text?: string; opacity?: Num; scale?: Num } = {}) {
-  if (!text.trim()) throw new Error('Enter watermark text.');
+export async function watermark(bytes: Uint8Array, { text: typed = 'CONFIDENTIAL', opacity = 0.15, scale = 1 }: { text?: string; opacity?: Num; scale?: Num } = {}) {
+  if (!typed.trim()) throw new Error('Enter watermark text.');
+  const text = winAnsi(typed).trim();
+  if (!text) throw new Error('Watermarks can only use Latin letters, numbers and common symbols.');
   const doc = await load(bytes);
   const font = await doc.embedFont(StandardFonts.HelveticaBold);
   doc.getPages().forEach((p) => {
@@ -461,9 +511,14 @@ export async function pageNumbers(bytes: Uint8Array, { position = 'center', form
   doc.getPages().forEach((p, i) => {
     const label = format === 'of' ? `Page ${i + 1} of ${n}` : `${i + 1}`;
     const tw = font.widthOfTextAtSize(label, 10);
-    const { x, y, width } = p.getCropBox();
-    const lx = position === 'left' ? x + 28 : position === 'right' ? x + width - 28 - tw : x + (width - tw) / 2;
-    p.drawText(label, { x: lx, y: y + 20, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+    // Placed on the page as displayed, so a page saved sideways with /Rotate still gets its number upright at the
+    // bottom: the baseline 20pt up, 28pt in from the side (the same frame Fill & Sign draws in).
+    const cb = p.getCropBox();
+    const rot = rotOf(p);
+    const [dw, dh] = rot % 180 ? [cb.height, cb.width] : [cb.width, cb.height];
+    const lx = position === 'left' ? 28 : position === 'right' ? dw - 28 - tw : (dw - tw) / 2;
+    const at = placeOnPage([lx / dw, (dh - 20 - 10 * DESCENT) / dh, 0, (10 * DESCENT) / dh], rot, cb.width, cb.height);
+    p.drawText(label, { x: cb.x + at.x, y: cb.y + at.y, size: 10, font, color: rgb(0.2, 0.2, 0.2), rotate: degrees(rot) });
   });
   return save(doc);
 }
