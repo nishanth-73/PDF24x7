@@ -123,13 +123,11 @@ fun FilesTab() {
       LargeTitle("Files", if (onDrive) "Synced with Google Drive" else subtitle)
     }
 
-    // Phone / Google Drive. Switching keeps you in the same folder when it exists on the other side.
-    Segmented(listOf(false to "On this phone", true to "Google Drive"), onDrive, icons = listOf(I.cellphone, I.googleDrive)) { drive ->
-      if (drive == onDrive) return@Segmented
-      if (drive) driveFolder = folder?.name else folderPath = driveFolder?.let { n -> folders.firstOrNull { it.first.name == n }?.first?.path }
-      onDrive = drive
+    // Phone / Google Drive, only at the top level: inside a folder the subtitle already says which side it is.
+    if (folderName == null) {
+      Segmented(listOf(false to "On this phone", true to "Google Drive"), onDrive, icons = listOf(I.cellphone, I.googleDrive)) { onDrive = it }
+      Spacer(Modifier.height(12.dp))
     }
-    Spacer(Modifier.height(12.dp))
     SearchField(query, { query = it }, "Search files…")
 
     AnimatedContent(onDrive, label = "place", transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) }) { drive ->
@@ -373,6 +371,9 @@ private fun ColumnScope.DriveFiles(query: String, folder: String?, onOpenFolder:
   var busyId by remember { mutableStateOf("") }
   var picked by remember { mutableStateOf<Set<String>?>(null) } // selected file ids; null when not selecting
   var downloading by remember { mutableStateOf("") }
+  var folderMenu by remember { mutableStateOf<String?>(null) }
+  var renaming by remember { mutableStateOf<String?>(null) }
+  var deleting by remember { mutableStateOf<String?>(null) }
   val data = Backup.cached()
 
   // Only the first visit fetches: after that every sync, which lists Drive anyway, leaves a fresh listing behind.
@@ -465,7 +466,13 @@ private fun ColumnScope.DriveFiles(query: String, folder: String?, onOpenFolder:
         GroupLabel("Folders")
         Group {
           folders.forEachIndexed { i, name ->
-            ListRow(name, first = i == 0, lead = { FolderGlyph() }, chevron = true, subtitle = plural(all.count { it.folder == name }, "file"), onClick = { onOpenFolder(name) })
+            ListRow(
+              name, first = i == 0, lead = { FolderGlyph() }, subtitle = plural(all.count { it.folder == name }, "file"),
+              onClick = { onOpenFolder(name) }, onLongClick = { folderMenu = name },
+            ) {
+              if (busyId == name) Spinner(c.accent, modifier = Modifier.padding(horizontal = 10.dp))
+              else IconBtn(I.dotsVertical, color = c.sub, label = "More") { folderMenu = name }
+            }
           }
         }
       }
@@ -501,6 +508,44 @@ private fun ColumnScope.DriveFiles(query: String, folder: String?, onOpenFolder:
       Type.body, c.sub, Modifier.fillMaxWidth().padding(top = 40.dp), align = TextAlign.Center,
     )
   }
+  val folderAct = { name: String, fn: suspend () -> Unit ->
+    scope.launch {
+      busyId = name
+      error = ""
+      try { fn() } catch (e: Exception) { error = Backup.describe(e) }
+      busyId = ""
+    }
+    Unit
+  }
+  folderMenu?.let { name ->
+    val inside = all.filter { it.folder == name }
+    val toGet = inside.filter { !Backup.isOnPhone(it) }
+    ModalBottomSheet({ folderMenu = null }, containerColor = c.surface) {
+      Column(Modifier.padding(horizontal = 14.dp).padding(bottom = 18.dp).navigationBarsPadding()) {
+        T(name, Type.bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), maxLines = 1)
+        val pick = { run: () -> Unit -> { folderMenu = null; run() } }
+        MenuRow(
+          I.downloadOutline, "Download all",
+          if (toGet.isEmpty()) "Already on this phone" else "${plural(toGet.size, "file")} · ${fmtSize(toGet.sumOf { it.size })}",
+          onClick = pick { if (downloading.isEmpty()) download(toGet) },
+        )
+        MenuRow(I.pencilOutline, "Rename", onClick = pick { renaming = name })
+        MenuRow(I.deleteOutline, "Delete", color = c.accent, onClick = pick { deleting = name })
+      }
+    }
+  }
+  renaming?.let { name ->
+    PromptDialog("Rename Folder", name, "Renamed in Drive and on this phone.", "Folder name", "Save", onClose = { renaming = null }) { typed ->
+      folderAct(name) { Backup.renameFolder(name, typed) }
+    }
+  }
+  deleting?.let { name ->
+    ConfirmDialog(
+      "Delete folder?", "\"$name\" and ${plural(all.count { it.folder == name }, "file")} inside go to Drive's Trash for 30 days, and are deleted from this phone.",
+      "Delete", danger = true, requireTyping = "confirm", onDismiss = { deleting = null },
+    ) { folderAct(name) { Backup.deleteFolder(name) } }
+  }
+
   T(
     if (picked != null) "Tap files to add or remove them, or Select all for a whole day."
     else "Everything you save on this phone is backed up here. Files only in Drive stay there until you download them: tap the arrow, or hold a file to pick several.",

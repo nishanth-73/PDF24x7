@@ -169,14 +169,13 @@ fun ToolScreen(id: String, resume: Boolean) {
 
   // Saving asks for a name first, filled in with the usual one ("Report-compressed"). For several outputs (splits) the
   // name is the start of each part's name.
-  val saveAs = { typed: String ->
-    naming?.let { (outs, _) ->
-      val name = typed.replace(Regex("\\.(pdf|zip)$", RegexOption.IGNORE_CASE), "")
-      naming = null
-      scope.launch {
-        results = withContext(Dispatchers.IO) {
-          outs.map { o -> saveBytes(if (outs.size == 1) name else if (o.full) o.name else if (o.name.isNotEmpty()) "$name-${o.name}" else name, o.ext, o.bytes) }
-        }
+  // Takes the outputs, not `naming`: the dialog clears `naming` before it calls this.
+  val saveAs = { outs: List<Output>, typed: String ->
+    val name = typed.replace(Regex("\\.(pdf|zip)$", RegexOption.IGNORE_CASE), "")
+    naming = null
+    scope.launch {
+      results = withContext(Dispatchers.IO) {
+        outs.map { o -> saveBytes(if (outs.size == 1) name else if (o.full) o.name else if (o.name.isNotEmpty()) "$name-${o.name}" else name, o.ext, o.bytes) }
       }
     }
     Unit
@@ -283,7 +282,7 @@ fun ToolScreen(id: String, resume: Boolean) {
     // Only Discard throws the result away; back or a stray tap outside keeps it under the suggested name.
     PromptDialog(
       "Save as", name, if (outs.size > 1) "Each of the ${outs.size} files starts with this name." else "Saved in Files.", "File name", "Save", "Discard",
-      onClose = { naming = null }, onDismiss = { saveAs(name) }, onSubmit = saveAs,
+      onClose = { naming = null }, onDismiss = { saveAs(outs, name) }, onSubmit = { saveAs(outs, it) },
     )
   }
 }

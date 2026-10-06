@@ -253,7 +253,8 @@ object Backup {
 
   // Files downloaded from Files → Google Drive while a sync may be running. That sync listed the phone before they
   // arrived, so it links them as they are and leaves them alone, instead of the download waiting for it to finish.
-  private val justDownloaded = java.util.concurrent.ConcurrentHashMap<String, Synced>()
+  // Typed as a Kotlin Map so `in` checks keys (ConcurrentHashMap.contains looks at values).
+  private val justDownloaded: MutableMap<String, Synced> = java.util.concurrent.ConcurrentHashMap()
   @Volatile private var again = false
   private var timer: Job? = null
 
@@ -682,6 +683,45 @@ object Backup {
       if (!dest.exists() || dest.length() != f.size) downloadFromDrive(token, f.id, dest)
       Picked(f.name, dest.path, dest.length())
     }
+  }
+
+  private fun driveFolders(token: String, root: String) = listChildren(token, root).filter { it.mime == FOLDER_MIME }.associate { it.name to it.id }
+
+  // The phone copy of a Drive folder; null for a Drive name that can't be one ("..", or with a slash).
+  private fun phoneFolder(name: String) = name.takeIf { it.isNotBlank() && it != "." && it != ".." && cleanName(it) == it }?.let { File(rootFolder(), it) }
+
+  // Folder renames and deletes from Files → Google Drive change both sides and the sync records in one go, so the next
+  // sync has nothing to guess (and a big deleted folder doesn't trip its "many files vanished" safety stop).
+
+  suspend fun renameFolder(old: String, typed: String) = withContext(Dispatchers.IO) {
+    val s = state
+    val email = s.email?.takeIf { s.enabled } ?: throw UserError("Google Drive sync is off.")
+    val name = cleanName(typed)
+    if (name.isEmpty() || name == old) return@withContext
+    val target = phoneFolder(name) ?: throw UserError("That name can't be used for a folder.")
+    withToken(email) { token ->
+      val folders = driveFolders(token, ensureRoot(token, s.folderId))
+      if (name in folders || target.exists()) throw UserError("A folder named \"$name\" already exists.")
+      val id = folders[old] ?: throw UserError("This folder is no longer in Drive.")
+      call(token, "$API/files/$id", "PATCH", JSONObject().put("name", name))
+    }
+    phoneFolder(old)?.takeIf { it.exists() }?.renameTo(target)
+    val move = { rel: String -> splitRel(rel).let { (dir, file) -> if (dir == old) "$name/$file" else rel } }
+    update { x -> if (x.email != email) x else x.copy(entries = x.entries.mapKeys { move(it.key) }, driveOnly = x.driveOnly.mapKeys { move(it.key) }, folders = x.folders.mapKeys { if (it.key == old) name else it.key }) }
+    listing?.let { (e, d) -> remember(e, DriveListing(d.folders.map { if (it == old) name else it }, d.files.map { if (it.folder == old) it.copy(folder = name) else it })) }
+    withContext(Dispatchers.Main) { Store.refreshOnly() }
+  }
+
+  /** Moves the folder to Drive's Trash and deletes it from this phone too. */
+  suspend fun deleteFolder(name: String) = withContext(Dispatchers.IO) {
+    val s = state
+    val email = s.email?.takeIf { s.enabled } ?: throw UserError("Google Drive sync is off.")
+    withToken(email) { token -> driveFolders(token, ensureRoot(token, s.folderId))[name]?.let { trashInDrive(token, it) } }
+    phoneFolder(name)?.deleteRecursively()
+    val inside = { rel: String -> splitRel(rel).first == name }
+    update { x -> if (x.email != email) x else x.copy(entries = x.entries.filterKeys { !inside(it) }, driveOnly = x.driveOnly.filterKeys { !inside(it) }, folders = x.folders - name) }
+    listing?.let { (e, d) -> remember(e, DriveListing(d.folders - name, d.files.filter { it.folder != name })) }
+    withContext(Dispatchers.Main) { Store.refreshOnly() }
   }
 }
 

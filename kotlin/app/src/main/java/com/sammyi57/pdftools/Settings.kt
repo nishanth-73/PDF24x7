@@ -33,6 +33,7 @@ fun SettingsTab() {
   val files = remember(Store.version) { listAllFiles() }
   var clearConfirm by remember { mutableStateOf(false) }
   var clearChoice by remember { mutableStateOf(false) } // files are also in Google Drive
+  var driveConfirm by remember { mutableStateOf(false) }
   var terms by remember { mutableStateOf(false) }
   val clearAll = { keepDrive: Boolean ->
     if (keepDrive) Backup.keepInDriveOnly(files.map { it.path })
@@ -90,13 +91,19 @@ fun SettingsTab() {
     AppDialog({ clearChoice = false }, "Delete all saved files?", "${plural(files.size, "file")} made in PDF Tools. They're also in your Google Drive.") {
       Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Btn("Delete from this phone only", Modifier.fillMaxWidth(), I.cellphoneRemove, BtnKind.Secondary) { clearAll(true) }
-        Btn("Delete from phone and Drive", Modifier.fillMaxWidth(), I.deleteOutline, BtnKind.Danger) { clearAll(false) }
+        Btn("Delete from phone and Drive", Modifier.fillMaxWidth(), I.deleteOutline, BtnKind.Danger) { clearChoice = false; driveConfirm = true }
         T(
           "Phone only keeps everything in Drive; download files again from Files → Google Drive. Phone and Drive moves the Drive copies to Drive's Trash for 30 days.",
           Type.small, c.sub, align = TextAlign.Center,
         )
       }
     }
+  }
+  if (driveConfirm) {
+    ConfirmDialog(
+      "Delete from phone and Drive?", "${plural(files.size, "file")} will be removed from this phone, and the Drive copies moved to Drive's Trash.",
+      "Delete all", danger = true, requireTyping = "confirm", onDismiss = { driveConfirm = false },
+    ) { clearAll(false) }
   }
 }
 

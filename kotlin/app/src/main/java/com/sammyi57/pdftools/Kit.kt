@@ -449,8 +449,8 @@ fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
   ) { T(label, Type.med.copy(fontSize = Type.med.fontSize * 0.97f), fg) }
 }
 
-/** The selected chip: the app's orange running into the deep blue of the Recent panel. */
-val SelectGradient = listOf(Color(0xFFE5694B), Color(0xFF1B4FB0))
+/** The selected chip: the hero's orange, dark red into bright orange. */
+val SelectGradient = listOf(Color(0xFFB02E17), Color(0xFFEF8A2E))
 
 /** A segmented control whose selected pill slides between the choices. */
 @Composable
