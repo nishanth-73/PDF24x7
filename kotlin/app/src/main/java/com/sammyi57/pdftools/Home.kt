@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
@@ -127,13 +130,17 @@ private fun Hero(files: List<Saved>, onScan: () -> Unit) {
     appendInlineContent("cam", "[camera]")
     withStyle(SpanStyle(color = Color.White)) { append(" scan?") }
   }
-  // Sized from the font, not fixed dp, so it scales with the text. The glyph's body spans 4..20 of its 24 box: dropping
-  // it by 4/24 of its size puts the camera on the baseline, as tall as a capital.
-  val em = with(androidx.compose.ui.platform.LocalDensity.current) { Type.hero.fontSize.toDp() }
+  // Sized in sp like the words, so it follows the font scale. The glyph's body spans 2..20 of its 24 box: dropping it by
+  // 4/24 sits the camera on the baseline, about as tall as a capital.
+  val camSize = Type.hero.fontSize
+  val drop = with(androidx.compose.ui.platform.LocalDensity.current) { (camSize * (4f / 24f)).toDp() }
   val inline = mapOf(
     "cam" to InlineTextContent(Placeholder(1.1.em, 1.em, PlaceholderVerticalAlign.AboveBaseline)) {
       Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        Icon(I.cameraOutline, em * 1.05f, Color.White, Modifier.offset(y = em * 1.05f * 4 / 24))
+        BasicText(
+          String(Character.toChars(I.cameraOutline)), Modifier.offset(y = drop),
+          TextStyle(fontFamily = Mdi, fontSize = camSize, lineHeight = camSize, color = Color.White),
+        )
       }
     },
   )

@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // Material Design Icons, drawn from the same font the Expo app used, so every icon looks exactly as before.
-private val Mdi = FontFamily(Font(R.font.mdi))
+val Mdi = FontFamily(Font(R.font.mdi))
 
 @Composable
 fun Icon(glyph: Int, size: Dp = 22.dp, color: Color = c.ink, modifier: Modifier = Modifier, label: String? = null) {
