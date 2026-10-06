@@ -12,6 +12,10 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitAll
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -182,7 +186,7 @@ object Backup {
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", mime)
         conn.setFixedLengthStreamingMode(f.length())
-        conn.outputStream.use { out -> f.inputStream().use { it.copyTo(out) } }
+        conn.outputStream.use { out -> f.inputStream().use { it.copyTo(out, 256 * 1024) } }
         JSONObject(conn.text())
       } finally {
         conn.disconnect()
@@ -199,7 +203,7 @@ object Backup {
       val conn = open(token, "$API/files/$id?alt=media", "GET")
       try {
         if (conn.responseCode !in 200..299) throw DriveError(conn.responseCode, "")
-        conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+        conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it, 256 * 1024) } }
       } finally {
         conn.disconnect()
       }
@@ -246,6 +250,10 @@ object Backup {
   // ── Sync ────────────────────────────────────────────────────────────────
 
   private var running: Deferred<Unit>? = null
+
+  // Files downloaded from Files → Google Drive while a sync may be running. That sync listed the phone before they
+  // arrived, so it links them as they are and leaves them alone, instead of the download waiting for it to finish.
+  private val justDownloaded = java.util.concurrent.ConcurrentHashMap<String, Synced>()
   @Volatile private var again = false
   private var timer: Job? = null
 
@@ -302,6 +310,7 @@ object Backup {
   private class Remote(val id: String, val size: Long, val md5: String?, val modified: String, val parent: String)
 
   private suspend fun reconcile(token: String, email: String, mine: ((BackupState) -> BackupState) -> Unit) {
+    justDownloaded.clear() // anything finished by now is already in the state read next and on disk for scanLocal
     val s = state
     val rootId = ensureRoot(token, s.folderId)
     val fresh = rootId != s.folderId
@@ -313,7 +322,12 @@ object Backup {
     // Merges with the saved state, so a "delete from this phone only" made while this run is working isn't lost.
     val save = {
       mine { x ->
+        for ((rel, link) in justDownloaded) {
+          entries[rel] = link
+          driveOnly.remove(rel)
+        }
         for (rel in x.driveOnly.keys) {
+          if (rel in justDownloaded) continue
           if (rel in cleared) continue
           driveOnly[rel] = true
           entries.remove(rel)
@@ -382,7 +396,7 @@ object Backup {
 
     // Renames and moves on the phone: a new file with exactly the same content (MD5) as one missing from its old spot
     // is moved in Drive instead of uploading a copy and trashing the original.
-    val gone = entries.entries.filter { (rel, _) -> rel !in localFiles && remote[rel]?.md5 != null }.map { it.key to it.value }.toMutableList()
+    val gone = entries.entries.filter { (rel, _) -> rel !in localFiles && rel !in justDownloaded && remote[rel]?.md5 != null }.map { it.key to it.value }.toMutableList()
     for ((rel, l) in localFiles.toMap()) {
       if (rel in entries || rel in remote) continue
       val sum by lazy { md5(l.file) }
@@ -406,6 +420,7 @@ object Backup {
 
     for (rel in (localFiles.keys + remote.keys + entries.keys + driveOnly.keys).toSet()) {
       if (!stillMine()) return
+      if (rel in justDownloaded) continue // arrived after this run looked at the phone: already linked
       val l = localFiles[rel]
       val r = remote[rel]
       val e = entries[rel]
@@ -595,19 +610,29 @@ object Backup {
    */
   suspend fun downloadToPhone(files: List<DriveFile>, onProgress: (Int) -> Unit) = withContext(Dispatchers.IO) {
     val email = state.email?.takeIf { state.enabled } ?: throw UserError("Google Drive sync is off.")
-    runCatching { running?.await() } // a sync mid-run would write back its older view of these files
+    val done = java.util.concurrent.atomic.AtomicInteger()
+    val slots = Semaphore(3) // a few at once: much faster than one by one, without starving a weak connection
     withToken(email) { token ->
-      files.forEachIndexed { n, f ->
-        val rel = relOfDrive(f)
-        val dest = localFile(rel)
-        if (!dest.exists()) { // one already here (linked, or not yet) is left to sync
-          downloadFromDrive(token, f.id, dest, f.modifiedTime)
-          update { x ->
-            if (x.email != email) x
-            else x.copy(driveOnly = x.driveOnly - rel, entries = x.entries + (rel to Synced(f.id, f.modifiedTime, dest.lastModified(), dest.length())))
+      coroutineScope {
+        files.distinctBy { relOfDrive(it) }.map { f ->
+          async {
+            slots.withPermit {
+              val rel = relOfDrive(f)
+              val dest = localFile(rel)
+              if (!dest.exists()) { // one already here (linked, or not yet) is left to sync
+                downloadFromDrive(token, f.id, dest, f.modifiedTime)
+                val link = Synced(f.id, f.modifiedTime, dest.lastModified(), dest.length())
+                update { x ->
+                  if (x.email != email) x
+                  else x.copy(driveOnly = x.driveOnly - rel, entries = x.entries + (rel to link))
+                }
+                justDownloaded[rel] = link
+              }
+              val n = done.incrementAndGet()
+              withContext(Dispatchers.Main) { onProgress(n) }
+            }
           }
-        }
-        withContext(Dispatchers.Main) { onProgress(n + 1) }
+        }.awaitAll()
       }
     }
     withContext(Dispatchers.Main) { Store.refreshOnly() }

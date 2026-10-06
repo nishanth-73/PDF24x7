@@ -197,26 +197,26 @@ private fun Stat(label: String, value: String) {
   }
 }
 
-// The black panel from the reference: small label, big title, a round white button per row.
+// The black panel from the reference, kept compact: small label, one line per file, a small round share button.
 @Composable
 private fun RecentPanel(recent: List<Saved>, onAll: () -> Unit) {
-  val shape = RoundedCornerShape(Radius.hero)
-  Column(Modifier.padding(top = 12.dp).fillMaxWidth().background(c.panel, shape).padding(start = 20.dp, end = 14.dp, top = 18.dp, bottom = 10.dp)) {
+  val shape = RoundedCornerShape(Radius.card)
+  Column(Modifier.padding(top = 12.dp).fillMaxWidth().background(c.panel, shape).padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 6.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      T("Recent", Type.item.copy(fontSize = Type.item.fontSize * 1.12f, fontWeight = Type.bold.fontWeight), c.onPanel, Modifier.weight(1f))
-      T("All files", Type.med, c.onPanelSub, Modifier.tap(scaleTo = 0.92f, onClick = onAll).padding(horizontal = 6.dp, vertical = 4.dp))
+      T("Recent", Type.bold, c.onPanel, Modifier.weight(1f))
+      T("All files", Type.small, c.onPanelSub, Modifier.tap(scaleTo = 0.92f, onClick = onAll).padding(horizontal = 6.dp, vertical = 2.dp))
     }
     recent.forEach { f ->
       Row(
-        Modifier.fillMaxWidth().tap(scaleTo = 0.98f, label = "Open ${stem(f.name)}") { openFile(f.path, f.name) }.padding(vertical = 10.dp),
+        Modifier.fillMaxWidth().tap(scaleTo = 0.98f, label = "Open ${stem(f.name)}") { openFile(f.path, f.name) }.padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Column(Modifier.weight(1f)) {
-          T("${kindOf(f.name).name.uppercase()} · ${fmtSize(f.size)} · ${fmtDate(f.modified)}", Type.small, c.onPanelSub, maxLines = 1)
-          Marquee(stem(f.name), Type.big.copy(fontSize = Type.big.fontSize * 0.8f), c.onPanel)
+          Marquee(stem(f.name), Type.item, c.onPanel)
+          T("${kindOf(f.name).name.uppercase()} · ${fmtSize(f.size)} · ${fmtDate(f.modified)}", Type.small.copy(fontSize = 11.5.sp, lineHeight = 15.sp), c.onPanelSub, maxLines = 1)
         }
-        Spacer(Modifier.size(10.dp))
-        RoundBtn(I.shareVariantOutline, c.onPanel, c.panel, 46.dp, "Share") { share(f.path, f.name) }
+        Spacer(Modifier.size(8.dp))
+        RoundBtn(I.shareVariantOutline, c.onPanel, c.panel, 34.dp, "Share") { share(f.path, f.name) }
       }
     }
   }
