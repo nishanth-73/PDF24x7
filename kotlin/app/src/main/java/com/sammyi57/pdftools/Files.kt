@@ -456,6 +456,7 @@ private fun ColumnScope.DriveFiles(query: String, folder: String?, onOpenFolder:
 
   Spacer(Modifier.height(12.dp))
   GroupLabel(state.email ?: "Google Drive", if (Backup.syncing) "Syncing…" else "Sync now", if (Backup.syncing) null else ({ Backup.syncNow(); Unit }), first = true)
+  Box(Modifier.padding(top = 6.dp).fillMaxWidth().height(0.6.dp).background(c.line)) // sets the account apart from the files under it
   if (problem.isNotEmpty()) T(problem, Type.small, c.accent, Modifier.padding(top = 4.dp, bottom = 4.dp))
   if (downloading.isNotEmpty() && picked == null) T(downloading, Type.small, c.sub, Modifier.padding(vertical = 4.dp))
 
