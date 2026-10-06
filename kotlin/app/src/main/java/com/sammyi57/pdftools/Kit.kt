@@ -18,6 +18,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
@@ -439,13 +440,17 @@ fun Spinner(color: Color = c.ink, size: Dp = 22.dp, modifier: Modifier = Modifie
 @Composable
 fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
   val shape = CircleShape
-  val bg by androidx.compose.animation.animateColorAsState(if (active) c.ink else Color.Transparent, tween(200), label = "chip")
-  val fg by androidx.compose.animation.animateColorAsState(if (active) c.onInk else c.ink, tween(200), label = "chipText")
+  val on by animateFloatAsState(if (active) 1f else 0f, tween(200), label = "chip")
+  val line by androidx.compose.animation.animateColorAsState(if (active) Color.Transparent else c.lineStrong, tween(200), label = "chipLine")
+  val fg by androidx.compose.animation.animateColorAsState(if (active) Color.White else c.ink, tween(200), label = "chipText")
   Box(
-    Modifier.tap(shape = shape, scaleTo = 0.93f, onClick = onClick).background(bg, shape)
-      .border(1.dp, if (active) c.ink else c.lineStrong, shape).padding(horizontal = 15.dp, vertical = 7.dp),
+    Modifier.tap(shape = shape, scaleTo = 0.93f, onClick = onClick).background(Brush.horizontalGradient(SelectGradient), shape, alpha = on)
+      .border(1.dp, line, shape).padding(horizontal = 15.dp, vertical = 7.dp),
   ) { T(label, Type.med.copy(fontSize = Type.med.fontSize * 0.97f), fg) }
 }
+
+/** The selected chip: the app's orange running into the deep blue of the Recent panel. */
+val SelectGradient = listOf(Color(0xFFE5694B), Color(0xFF1B4FB0))
 
 /** A segmented control whose selected pill slides between the choices. */
 @Composable
