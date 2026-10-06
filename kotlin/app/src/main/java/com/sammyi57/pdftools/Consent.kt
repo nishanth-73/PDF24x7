@@ -30,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -178,11 +179,17 @@ private fun Tick(on: Boolean, before: String, link: String, toggle: () -> Unit, 
   }
 }
 
-/** Fades and lifts its content in, a beat after the one before it. */
+/**
+ * Fades and lifts its content in, a beat after the one before it. Plays once per screen: coming back to a screen (from a
+ * tool, or another tab) shows it as it was, instead of blank while every section fades in again.
+ */
 @Composable
 fun Stagger(index: Int, content: @Composable () -> Unit) {
-  val t = remember { Animatable(0f) }
+  var played by rememberSaveable { mutableStateOf(false) }
+  val t = remember { Animatable(if (played) 1f else 0f) }
   LaunchedEffect(Unit) {
+    if (played) return@LaunchedEffect
+    played = true
     delay(60L * index.coerceAtMost(8))
     t.animateTo(1f, tween(380))
   }
