@@ -75,9 +75,22 @@ assert.deepEqual(placed(0), [40, 420, 200, 60]);
 assert.deepEqual(placed(90), [120, 60, 300, 40]);
 assert.deepEqual(placed(180), [360, 180, 200, 60]);
 assert.deepEqual(placed(270), [280, 540, 300, 40]);
+// Unturned, placeTurned lands where placeOnPage does on every page rotation; turned 180° about its centre, an item's
+// drawing origin moves to its opposite corner (a 400x600 page: box 40..140 across, 430..480 up).
+for (const rot of [0, 90, 180, 270]) {
+  const [dw, dh] = rot % 180 ? [600, 400] : [400, 600];
+  const turned0 = P.placeTurned(0.1, 0.2, 0.5 * dw, 0.1 * dh, 0, 0, rot, 400, 600);
+  const flat = P.placeOnPage(item, rot, 400, 600);
+  assert.deepEqual([turned0.x, turned0.y, turned0.rotate].map(Math.round), [flat.x, flat.y, rot].map(Math.round), `rot ${rot}`);
+}
+const half = P.placeTurned(0.1, 0.2, 100, 50, 0, 180, 0, 400, 600);
+assert.deepEqual([half.x, half.y, half.rotate].map(Math.round), [140, 480, -180]);
 const signed = await PDFDocument.load(await P.fillSign(
   src,
-  [{ page: 0, kind: 'text', x: 0.1, y: 0.1, size: 0.03, text: 'Signed "here" — ok' }, { page: 1, kind: 'image', x: 0.2, y: 0.2, w: 0.3, h: 0.2, uri: 'sig' }],
+  [
+    { page: 0, kind: 'text', x: 0.1, y: 0.1, size: 0.03, text: 'Signed "here" — ok', color: '#1D4ED8', opacity: 0.5, angle: -15 },
+    { page: 1, kind: 'image', x: 0.2, y: 0.2, w: 0.3, h: 0.2, uri: 'sig', opacity: 0.6, angle: 90 },
+  ],
   { sig: photo },
 ));
 assert.equal(signed.getPageCount(), 6);

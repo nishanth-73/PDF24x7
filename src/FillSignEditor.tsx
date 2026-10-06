@@ -2,10 +2,10 @@
 // where they belong, then the tool burns them in. Items are fractions of the page as shown, kept in opts.items so a
 // resumed draft keeps them. Works on any PDF — a real form, or a scan of one.
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Image, PanResponder, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { pageSizes, renderPage, renderThumbnails, type Thumb } from '../modules/pdf-thumbnails';
-import { winAnsi, type SignItem } from './pdf';
+import { INK, winAnsi, type SignItem } from './pdf';
 import { Button, IconBtn, Icon, PromptModal, plural } from './ui';
 import { fonts, makeStyles, radius, typo, useTheme } from './theme';
 import type { EditorProps } from './ToolRunner';
@@ -16,6 +16,9 @@ const STRIP_GAP = 8;
 const TEXT_SIZE = 0.028; // a new line's height, as a fraction of the page
 const IMG_W = 0.34; // a new picture's width, as a fraction of the page
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
+// Pen colours, the usual ones for filling forms in; ink first.
+const COLORS: [hex: string, name: string][] = [[INK, 'Black'], ['#1D4ED8', 'Blue'], ['#DC2626', 'Red'], ['#15803D', 'Green'], ['#6B7280', 'Grey']];
+const OPACITY = [1, 0.75, 0.5, 0.25];
 
 export function FillSignEditor({ file, value, onChange, onError }: EditorProps) {
   const s = useStyles();
@@ -77,6 +80,14 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
     if (!it) return;
     if (it.kind === 'text') edit(i, { size: Math.max(0.008, Math.min(0.3, it.size * by)) } as Partial<SignItem>);
     else edit(i, { w: Math.max(0.04, Math.min(1, it.w * by)), h: Math.max(0.02, Math.min(1, it.h * by)) } as Partial<SignItem>);
+  };
+
+  // Turns the selected item clockwise, kept within -180..180 so the label reads naturally.
+  const turn = (by: number) => {
+    const it = items[sel];
+    if (!it) return;
+    const a = ((((it.angle ?? 0) + by) % 360) + 540) % 360 - 180;
+    edit(sel, { angle: a === -180 ? 180 : a });
   };
 
   const pickImage = async () => {
@@ -156,16 +167,21 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
                   s.item,
                   // mid-drag the position comes from local state, so the page follows the finger without touching opts
                   { left: (drag?.i === i ? drag.x : it.x) * dw, top: (drag?.i === i ? drag.y : it.y) * dh },
+                  { transform: [{ rotate: `${it.angle ?? 0}deg` }] }, // about its centre, like the PDF
                   sel === i && { borderColor: c.accent, backgroundColor: c.accentSoft },
                 ]}
               >
-                {it.kind === 'text' ? (
-                  <Text style={{ fontFamily: fonts.sans, fontSize: it.size * dh, lineHeight: it.size * dh * 1.16, color: '#0F172A' }}>
-                    {it.text}
-                  </Text>
-                ) : (
-                  <Image source={{ uri: it.uri }} style={{ width: it.w * dw, height: it.h * dh }} resizeMode="contain" />
-                )}
+                {/* Opacity on the content only, so a faded item's selection frame stays easy to see. */}
+                <View style={{ opacity: it.opacity ?? 1 }}>
+                  {it.kind === 'text' ? (
+                    // Android's sans-serif (Roboto) is the closest system font to the Helvetica the PDF gets.
+                    <Text style={{ fontFamily: 'sans-serif', fontSize: it.size * dh, lineHeight: it.size * dh * 1.16, color: it.color ?? INK }}>
+                      {it.text}
+                    </Text>
+                  ) : (
+                    <Image source={{ uri: it.uri }} style={{ width: it.w * dw, height: it.h * dh }} resizeMode="contain" />
+                  )}
+                </View>
               </View>
             ))}
             {loading && (
@@ -196,6 +212,56 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
           </>
         )}
       </View>
+
+      {!!selected && (
+        <View style={s.panel}>
+          {selected.kind === 'text' && (
+            <View style={s.panelRow}>
+              <Text style={s.panelLabel}>Colour</Text>
+              <View style={s.swatches}>
+                {COLORS.map(([hex, name]) => {
+                  const on = (selected.color ?? INK) === hex;
+                  return (
+                    <Pressable
+                      key={hex} onPress={() => edit(sel, { color: hex } as Partial<SignItem>)} hitSlop={4}
+                      accessibilityRole="radio" accessibilityLabel={name} accessibilityState={{ selected: on }}
+                      style={[s.swatchRing, on && { borderColor: c.accent }]}
+                    >
+                      <View style={[s.swatch, { backgroundColor: hex }]} />
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+          <View style={s.panelRow}>
+            <Text style={s.panelLabel}>Opacity</Text>
+            <View style={s.segTrack}>
+              {OPACITY.map((v) => {
+                const on = Math.abs((selected.opacity ?? 1) - v) < 0.01;
+                return (
+                  <Pressable key={v} onPress={() => edit(sel, { opacity: v })} style={[s.segItem, on && s.segOn]} accessibilityState={{ selected: on }}>
+                    <Text style={[s.segText, on && { color: c.ink }]}>{Math.round(v * 100)}%</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <View style={s.panelRow}>
+            <Text style={s.panelLabel}>Rotate</Text>
+            <View style={s.rotateRow}>
+              <IconBtn name="rotate-left" onPress={() => turn(-15)} />
+              <Pressable onPress={() => edit(sel, { angle: 0 })} hitSlop={6} accessibilityLabel="Straighten">
+                <Text style={s.angle}>{selected.angle ?? 0}°</Text>
+              </Pressable>
+              <IconBtn name="rotate-right" onPress={() => turn(15)} />
+              <Pressable onPress={() => turn(90)} style={({ pressed }) => [s.quarter, pressed && { backgroundColor: c.sunken }]}>
+                <Text style={s.quarterText}>+90°</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      )}
 
       <View style={s.addRow}>
         <Button icon="format-text" label="Add text" variant="secondary" onPress={() => setTyping(-1)} style={{ flex: 1 }} />
@@ -247,7 +313,7 @@ export function FillSignEditor({ file, value, onChange, onError }: EditorProps) 
 
       <Text style={s.hint}>
         {items.length
-          ? `${plural(items.length, 'item')} added. Drag anything to move it, tap it to resize, edit or remove it.`
+          ? `${plural(items.length, 'item')} added. Drag anything to move it; tap it to resize, recolour, fade or turn it.`
           : 'Add a line of text or a picture of your signature, then drag it where it belongs.'}
       </Text>
     </>
@@ -263,6 +329,23 @@ const useStyles = makeStyles((c) => ({
   pageBtn: { flexDirection: 'row', alignItems: 'center', paddingLeft: 6, paddingRight: 2, paddingVertical: 4, borderRadius: 8 },
   pageNum: { fontFamily: fonts.med, fontSize: 14, color: c.ink },
   addRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  panel: {
+    marginTop: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.group, backgroundColor: c.surface,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong,
+  },
+  panelRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48 },
+  panelLabel: { width: 72, fontFamily: fonts.med, fontSize: 13.5, color: c.sub },
+  swatches: { flex: 1, flexDirection: 'row', gap: 10 },
+  swatchRing: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' },
+  swatch: { width: 24, height: 24, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
+  segTrack: { flex: 1, flexDirection: 'row', padding: 3, borderRadius: radius.control, backgroundColor: c.sunken },
+  segItem: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: radius.control - 3 },
+  segOn: { backgroundColor: c.bg, borderWidth: StyleSheet.hairlineWidth, borderColor: c.lineStrong },
+  segText: { fontFamily: fonts.med, fontSize: 13, color: c.sub },
+  rotateRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  angle: { minWidth: 48, textAlign: 'center', ...typo.num, fontSize: 14, color: c.ink },
+  quarter: { marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: c.lineStrong },
+  quarterText: { fontFamily: fonts.med, fontSize: 13, color: c.ink },
   strip: { gap: STRIP_GAP, paddingVertical: 8, paddingHorizontal: 2 },
   thumbCell: { width: STRIP_W, alignItems: 'center' },
   thumb: {

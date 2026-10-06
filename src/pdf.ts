@@ -385,9 +385,37 @@ const unrotate = ([x, y, w, h]: Box, rot: number): Box =>
 
 // Something the user dropped onto a page in Fill & Sign. Positions are fractions of the page as displayed, y from
 // the top, so they mean the same thing as what the editor drew. Text keeps no width: it is as wide as it needs.
+// `angle` turns the item clockwise about its centre as seen, `opacity` is 0-1, `color` a text's #RRGGBB.
+type SignLook = { angle?: number; opacity?: number };
 export type SignItem =
-  | { page: number; kind: 'text'; x: number; y: number; size: number; text: string }
-  | { page: number; kind: 'image'; x: number; y: number; w: number; h: number; uri: string };
+  | ({ page: number; kind: 'text'; x: number; y: number; size: number; text: string; color?: string } & SignLook)
+  | ({ page: number; kind: 'image'; x: number; y: number; w: number; h: number; uri: string } & SignLook);
+export const INK = '#0F172A'; // text's default colour: a dark blue-black, like a pen
+
+/**
+ * Where to draw an item that sits, as displayed, with its top-left at fractions (x, y) of the page, is w×h points, and
+ * is turned `angle` degrees clockwise about its centre. `oy` lifts the drawing origin above the item's bottom edge (a
+ * text's baseline). Returns that origin in the page's stored frame and the rotation to draw at there, so the item reads
+ * as placed however the page's /Rotate turns it.
+ */
+export function placeTurned(x: number, y: number, w: number, h: number, oy: number, angle: number, rot: number, W: number, H: number) {
+  const [dw, dh] = rot % 180 ? [H, W] : [W, H];
+  const cx = x * dw + w / 2;
+  const cy = dh - y * dh - h / 2; // centre in the displayed frame, y up
+  const t = (-angle * Math.PI) / 180; // clockwise on screen is negative in PDF's y-up frame
+  const [lx, ly] = [-w / 2, oy - h / 2];
+  const X = cx + lx * Math.cos(t) - ly * Math.sin(t);
+  const Y = cy + lx * Math.sin(t) + ly * Math.cos(t);
+  // The displayed page is the stored one turned clockwise by `rot`; undo that.
+  const [u, v] = rot === 90 ? [W - Y, X] : rot === 180 ? [W - X, H - Y] : rot === 270 ? [Y, H - X] : [X, Y];
+  return { x: u, y: v, rotate: rot - angle };
+}
+
+const hexColor = (hex: string | undefined) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? INK) ?? /^#?([0-9a-f]{6})$/i.exec(INK)!;
+  const n = parseInt(m[1], 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+};
 
 /**
  * Where to draw an item placed on the page as displayed: the origin to draw from, the item's natural size, and
@@ -421,6 +449,8 @@ export async function fillSign(bytes: Uint8Array, items: SignItem[], images: Rec
     if (!p) continue;
     const rot = rotOf(p);
     const { width: W, height: H } = p.getSize();
+    const [dw, dh] = rot % 180 ? [H, W] : [W, H]; // the page as displayed, which item fractions are of
+    const look = { opacity: Math.max(0.05, Math.min(1, it.opacity ?? 1)) };
     if (it.kind === 'image') {
       if (!embedded[it.uri]) {
         const b = images[it.uri];
@@ -429,18 +459,19 @@ export async function fillSign(bytes: Uint8Array, items: SignItem[], images: Rec
         else if (b[0] === 0xff && b[1] === 0xd8) embedded[it.uri] = await doc.embedJpg(b);
         else throw new Error(`The picture on page ${it.page + 1} isn't a JPEG or PNG. Pick a different one.`);
       }
-      const at = placeOnPage([it.x, it.y, it.w, it.h], rot, W, H);
-      p.drawImage(embedded[it.uri], { x: at.x, y: at.y, width: at.w, height: at.h, rotate: degrees(rot) });
+      const [w, h] = [it.w * dw, it.h * dh];
+      const at = placeTurned(it.x, it.y, w, h, 0, it.angle ?? 0, rot, W, H);
+      p.drawImage(embedded[it.uri], { x: at.x, y: at.y, width: w, height: h, rotate: degrees(at.rotate), ...look });
       continue;
     }
     const text = winAnsi(it.text);
     if (!text) continue;
     font ??= await doc.embedFont(StandardFonts.Helvetica);
-    // The box's height is the font size; the baseline sits a descender up from its bottom edge. Both are measured
-    // in the page's own frame, so they stay right however the page is turned.
-    const size = placeOnPage([it.x, it.y, 0, it.size], rot, W, H).h;
-    const at = placeOnPage([it.x, it.y, 0, it.size * DESCENT], rot, W, H);
-    p.drawText(text, { x: at.x, y: at.y, size, font, color: rgb(0.06, 0.09, 0.16), rotate: degrees(rot) });
+    // The item's box is as tall as the font size and as wide as the text; the baseline sits a descender up from its
+    // bottom edge, which is where drawing starts.
+    const size = it.size * dh;
+    const at = placeTurned(it.x, it.y, font.widthOfTextAtSize(text, size), size, size * (1 - DESCENT), it.angle ?? 0, rot, W, H);
+    p.drawText(text, { x: at.x, y: at.y, size, font, color: hexColor(it.color), rotate: degrees(at.rotate), ...look });
   }
   return save(doc);
 }
