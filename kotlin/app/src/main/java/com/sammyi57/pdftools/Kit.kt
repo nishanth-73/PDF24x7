@@ -262,7 +262,7 @@ fun Screen(bottom: Dp = LocalBottomRoom.current, top: Boolean = true, content: @
           .verticalScroll(scroll)
           .then(if (top) Modifier.statusBarsPadding() else Modifier)
           .padding(horizontal = 18.dp)
-          .padding(top = 6.dp),
+          .padding(top = 2.dp),
       ) {
         content()
         Spacer(Modifier.height(bottom + if (float.value != null) 80.dp else 0.dp))
@@ -290,7 +290,7 @@ fun Floating(show: Boolean, content: @Composable () -> Unit) {
 
 @Composable
 fun LargeTitle(title: String, sub: String? = null) {
-  Column(Modifier.padding(top = 10.dp, bottom = 16.dp)) {
+  Column(Modifier.padding(top = 2.dp, bottom = 16.dp)) {
     T(title, Type.largeTitle)
     if (!sub.isNullOrEmpty()) T(sub, Type.small, c.sub, Modifier.padding(top = 2.dp))
   }
@@ -462,25 +462,27 @@ fun <K> Segmented(
   onChange: (K) -> Unit,
 ) {
   val index = choices.indexOfFirst { it.first == value }.coerceAtLeast(0)
-  BoxWithConstraints(modifier.fillMaxWidth().background(c.sunken, RoundedCornerShape(Radius.control)).padding(3.dp)) {
+  // A capsule track; the chosen side wears the same orange-to-blue gradient as a selected chip.
+  BoxWithConstraints(modifier.fillMaxWidth().background(c.sunken, CircleShape).border(0.6.dp, c.line, CircleShape).padding(4.dp)) {
     val w = maxWidth / choices.size
     val x by animateDpAsState(w * index, spring(0.8f, Spring.StiffnessMediumLow), label = "seg")
     Box(
-      Modifier.offset(x = x).size(w, 38.dp).shadow(1.dp, RoundedCornerShape(Radius.control - 3.dp))
-        .background(if (c.dark) c.lineStrong else c.surface, RoundedCornerShape(Radius.control - 3.dp)),
+      Modifier.offset(x = x).size(w, 40.dp).shadow(4.dp, CircleShape, ambientColor = SelectGradient[1], spotColor = SelectGradient[1])
+        .background(Brush.horizontalGradient(SelectGradient), CircleShape),
     )
     Row {
       choices.forEachIndexed { i, (k, label) ->
         val on = i == index
+        val fg by androidx.compose.animation.animateColorAsState(if (on) Color.White else c.sub, tween(200), label = "segText")
         Row(
-          Modifier.size(w, 38.dp).tap(scaleTo = 0.95f) { onChange(k) },
+          Modifier.size(w, 40.dp).tap(shape = CircleShape, scaleTo = 0.95f) { onChange(k) },
           horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
         ) {
           if (icons != null) {
-            Icon(icons[i], 17.dp, if (on) c.ink else c.sub)
+            Icon(icons[i], 17.dp, fg)
             Spacer(Modifier.size(6.dp))
           }
-          T(label, if (on) Type.bold.copy(fontSize = Type.med.fontSize) else Type.med, if (on) c.ink else c.sub, maxLines = 1)
+          T(label, if (on) Type.bold.copy(fontSize = Type.med.fontSize) else Type.med, fg, maxLines = 1)
         }
       }
     }
