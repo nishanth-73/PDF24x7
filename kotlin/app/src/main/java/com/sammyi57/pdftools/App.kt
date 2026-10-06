@@ -269,7 +269,7 @@ private fun ResumeBar(tool: Tool, files: Int) {
 }
 
 // The floating pill from the reference, in frosted glass: the page blurs behind it, a white circle slides to the open
-// tab, and the camera sits in accent red. Below Android 12 there is no blur, and the glass is just a darker tint.
+// tab, and the camera sits in accent red.
 @Composable
 private fun NavPill(haze: HazeState) {
   val nav = LocalNav.current
@@ -283,7 +283,7 @@ private fun NavPill(haze: HazeState) {
       .hazeEffect(haze) {
         blurRadius = 24.dp
         backgroundColor = glass
-        tints = listOf(HazeTint(glass.copy(alpha = 0.62f)))
+        tints = listOf(HazeTint(glass.copy(alpha = 0.5f)))
         noiseFactor = 0.08f
       }
       .border(0.6.dp, Color.White.copy(alpha = 0.14f), pill).padding(6.dp),
@@ -299,12 +299,12 @@ private fun NavPill(haze: HazeState) {
             Box(
               Modifier.size(46.dp).tap(shape = CircleShape, scaleTo = 0.86f, label = labels[i]) { nav.scan() }.background(c.accent, CircleShape),
               contentAlignment = Alignment.Center,
-            ) { Icon(glyph, 21.dp, Color.White, label = labels[i]) }
+            ) { Icon(glyph, 18.dp, Color.White, label = labels[i]) }
           } else {
             val on = nav.tab == tab
             val tint by androidx.compose.animation.animateColorAsState(if (on) c.panel else c.onPanelSub, tween(220), label = "tint")
             Box(Modifier.size(50.dp).tap(shape = CircleShape, scaleTo = 0.86f, label = labels[i]) { nav.show(tab) }, contentAlignment = Alignment.Center) {
-              Icon(glyph, 20.dp, tint, label = labels[i])
+              Icon(glyph, 17.dp, tint, label = labels[i])
             }
           }
         }
