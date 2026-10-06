@@ -228,7 +228,7 @@ private fun Capture(
   var denied by remember { mutableStateOf(false) }
   var kind by remember { mutableStateOf(retake?.kind ?: "doc") }
   var flash by remember { mutableStateOf("off") }
-  var auto by remember { mutableStateOf(true) }
+  var auto by remember { mutableStateOf(false) } // manual by default: the shutter fires only when tapped
   var corners by remember { mutableStateOf<List<Float>?>(null) }
   var steady by remember { mutableStateOf(false) }
   var lost by remember { mutableStateOf(false) }

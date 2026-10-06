@@ -18,6 +18,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
@@ -261,7 +262,7 @@ fun Screen(bottom: Dp = LocalBottomRoom.current, top: Boolean = true, content: @
           .verticalScroll(scroll)
           .then(if (top) Modifier.statusBarsPadding() else Modifier)
           .padding(horizontal = 18.dp)
-          .padding(top = 6.dp),
+          .padding(top = 2.dp),
       ) {
         content()
         Spacer(Modifier.height(bottom + if (float.value != null) 80.dp else 0.dp))
@@ -289,7 +290,7 @@ fun Floating(show: Boolean, content: @Composable () -> Unit) {
 
 @Composable
 fun LargeTitle(title: String, sub: String? = null) {
-  Column(Modifier.padding(top = 10.dp, bottom = 16.dp)) {
+  Column(Modifier.padding(top = 2.dp, bottom = 16.dp)) {
     T(title, Type.largeTitle)
     if (!sub.isNullOrEmpty()) T(sub, Type.small, c.sub, Modifier.padding(top = 2.dp))
   }
@@ -439,13 +440,17 @@ fun Spinner(color: Color = c.ink, size: Dp = 22.dp, modifier: Modifier = Modifie
 @Composable
 fun Chip(label: String, active: Boolean, onClick: () -> Unit) {
   val shape = CircleShape
-  val bg by androidx.compose.animation.animateColorAsState(if (active) c.ink else Color.Transparent, tween(200), label = "chip")
-  val fg by androidx.compose.animation.animateColorAsState(if (active) c.onInk else c.ink, tween(200), label = "chipText")
+  val on by animateFloatAsState(if (active) 1f else 0f, tween(200), label = "chip")
+  val line by androidx.compose.animation.animateColorAsState(if (active) Color.Transparent else c.lineStrong, tween(200), label = "chipLine")
+  val fg by androidx.compose.animation.animateColorAsState(if (active) Color.White else c.ink, tween(200), label = "chipText")
   Box(
-    Modifier.tap(shape = shape, scaleTo = 0.93f, onClick = onClick).background(bg, shape)
-      .border(1.dp, if (active) c.ink else c.lineStrong, shape).padding(horizontal = 15.dp, vertical = 7.dp),
+    Modifier.tap(shape = shape, scaleTo = 0.93f, onClick = onClick).background(Brush.horizontalGradient(SelectGradient), shape, alpha = on)
+      .border(1.dp, line, shape).padding(horizontal = 15.dp, vertical = 7.dp),
   ) { T(label, Type.med.copy(fontSize = Type.med.fontSize * 0.97f), fg) }
 }
+
+/** The selected chip: the app's orange running into the deep blue of the Recent panel. */
+val SelectGradient = listOf(Color(0xFFE5694B), Color(0xFF1B4FB0))
 
 /** A segmented control whose selected pill slides between the choices. */
 @Composable
@@ -457,25 +462,27 @@ fun <K> Segmented(
   onChange: (K) -> Unit,
 ) {
   val index = choices.indexOfFirst { it.first == value }.coerceAtLeast(0)
-  BoxWithConstraints(modifier.fillMaxWidth().background(c.sunken, RoundedCornerShape(Radius.control)).padding(3.dp)) {
+  // A capsule track; the chosen side wears the same orange-to-blue gradient as a selected chip.
+  BoxWithConstraints(modifier.fillMaxWidth().background(c.sunken, CircleShape).border(0.6.dp, c.line, CircleShape).padding(4.dp)) {
     val w = maxWidth / choices.size
     val x by animateDpAsState(w * index, spring(0.8f, Spring.StiffnessMediumLow), label = "seg")
     Box(
-      Modifier.offset(x = x).size(w, 38.dp).shadow(1.dp, RoundedCornerShape(Radius.control - 3.dp))
-        .background(if (c.dark) c.lineStrong else c.surface, RoundedCornerShape(Radius.control - 3.dp)),
+      Modifier.offset(x = x).size(w, 40.dp).shadow(4.dp, CircleShape, ambientColor = SelectGradient[1], spotColor = SelectGradient[1])
+        .background(Brush.horizontalGradient(SelectGradient), CircleShape),
     )
     Row {
       choices.forEachIndexed { i, (k, label) ->
         val on = i == index
+        val fg by androidx.compose.animation.animateColorAsState(if (on) Color.White else c.sub, tween(200), label = "segText")
         Row(
-          Modifier.size(w, 38.dp).tap(scaleTo = 0.95f) { onChange(k) },
+          Modifier.size(w, 40.dp).tap(shape = CircleShape, scaleTo = 0.95f) { onChange(k) },
           horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
         ) {
           if (icons != null) {
-            Icon(icons[i], 17.dp, if (on) c.ink else c.sub)
+            Icon(icons[i], 17.dp, fg)
             Spacer(Modifier.size(6.dp))
           }
-          T(label, if (on) Type.bold.copy(fontSize = Type.med.fontSize) else Type.med, if (on) c.ink else c.sub, maxLines = 1)
+          T(label, if (on) Type.bold.copy(fontSize = Type.med.fontSize) else Type.med, fg, maxLines = 1)
         }
       }
     }
