@@ -547,8 +547,7 @@ private fun ColumnScope.DriveFiles(query: String, folder: String?, onOpenFolder:
   }
 
   T(
-    if (picked != null) "Tap files to add or remove them, or Select all for a whole day."
-    else "Everything you save on this phone is backed up here. Files only in Drive stay there until you download them: tap the arrow, or hold a file to pick several.",
-    Type.small, c.sub, Modifier.padding(top = 12.dp),
+    if (picked != null) "Tap files to add or remove them." else "Hold a file to pick several.",
+    Type.small.copy(fontSize = Type.small.fontSize * 0.9f), c.faint, Modifier.fillMaxWidth().padding(top = 12.dp), align = TextAlign.Center,
   )
 }

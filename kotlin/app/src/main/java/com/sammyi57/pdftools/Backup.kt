@@ -712,6 +712,16 @@ object Backup {
     withContext(Dispatchers.Main) { Store.refreshOnly() }
   }
 
+  /** Settings → Delete all, phone and Drive: everything in the Drive folder (files, folders, Drive-only copies) goes to Drive's Trash, then the phone is cleared. */
+  suspend fun deleteEverything() = withContext(Dispatchers.IO) {
+    val s = state
+    val email = s.email?.takeIf { s.enabled } ?: throw UserError("Google Drive sync is off.")
+    withToken(email) { token -> for (item in listChildren(token, ensureRoot(token, s.folderId))) trashInDrive(token, item.id) }
+    update { x -> if (x.email != email) x else x.copy(entries = emptyMap(), driveOnly = emptyMap(), folders = emptyMap()) }
+    listing = email to DriveListing(emptyList(), emptyList())
+    withContext(Dispatchers.Main) { clearFiles() }
+  }
+
   /** Moves the folder to Drive's Trash and deletes it from this phone too. */
   suspend fun deleteFolder(name: String) = withContext(Dispatchers.IO) {
     val s = state

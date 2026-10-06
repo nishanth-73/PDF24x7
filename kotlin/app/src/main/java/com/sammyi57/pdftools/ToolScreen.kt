@@ -205,8 +205,8 @@ fun ToolScreen(id: String, resume: Boolean) {
       if (multi && files.size > 1) T("Use the arrows, or hold a file and drag it, to change the order.", Type.small, c.sub, Modifier.padding(top = 8.dp))
       if (multi) {
         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-          Btn("Add from Device", Modifier.weight(1f), I.plus, BtnKind.Secondary, height = 46.dp, onClick = pickDevice)
-          Btn("Add from App Files", Modifier.weight(1f), I.folderOutline, BtnKind.Secondary, height = 46.dp) { appFiles = true }
+          Btn("Device", Modifier.weight(1f), I.plus, BtnKind.Secondary, height = 46.dp, onClick = pickDevice)
+          Btn("App Files", Modifier.weight(1f), I.folderOutline, BtnKind.Secondary, height = 46.dp) { appFiles = true }
         }
       }
     }

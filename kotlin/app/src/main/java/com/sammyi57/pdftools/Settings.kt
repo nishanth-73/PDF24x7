@@ -34,7 +34,18 @@ fun SettingsTab() {
   var clearConfirm by remember { mutableStateOf(false) }
   var clearChoice by remember { mutableStateOf(false) } // files are also in Google Drive
   var driveConfirm by remember { mutableStateOf(false) }
+  var wiping by remember { mutableStateOf(false) }
   var terms by remember { mutableStateOf(false) }
+  val scope = rememberCoroutineScope()
+  // Drive goes first: if it fails, the phone keeps its files and the error shows under Google Drive.
+  val wipeBoth = {
+    wiping = true
+    scope.launch {
+      try { Backup.deleteEverything() } catch (e: Exception) { Backup.update { it.copy(error = Backup.describe(e)) } }
+      wiping = false
+    }
+    Unit
+  }
   val clearAll = { keepDrive: Boolean ->
     if (keepDrive) Backup.keepInDriveOnly(files.map { it.path })
     clearFiles()
@@ -53,8 +64,8 @@ fun SettingsTab() {
       ListRow("Saved files", first = true, lead = { Lead(I.folderOutline) }, value = files.size.toString())
       ListRow("Space used", lead = { Lead(I.harddisk) }, value = fmtSize(files.sumOf { it.size }))
       ListRow(
-        "Delete all saved files", lead = { Lead(I.trashCanOutline, true) }, danger = true,
-        onClick = if (files.isEmpty()) null else ({ if (Backup.hasDriveCopies(files.map { it.path })) clearChoice = true else clearConfirm = true }),
+        "Delete all saved files", lead = { Lead(I.trashCanOutline, true) }, danger = true, value = if (wiping) "Deleting…" else null,
+        onClick = if (files.isEmpty() || wiping) null else ({ if (Backup.hasDriveCopies(files.map { it.path })) clearChoice = true else clearConfirm = true }),
       )
     }
 
@@ -101,9 +112,9 @@ fun SettingsTab() {
   }
   if (driveConfirm) {
     ConfirmDialog(
-      "Delete from phone and Drive?", "${plural(files.size, "file")} will be removed from this phone, and the Drive copies moved to Drive's Trash.",
+      "Delete from phone and Drive?", "${plural(files.size, "file")} will be removed from this phone. Everything in the PDF Tools folder in your Drive, folders and Drive-only files included, goes to Drive's Trash for 30 days.",
       "Delete all", danger = true, requireTyping = "confirm", onDismiss = { driveConfirm = false },
-    ) { clearAll(false) }
+    ) { wipeBoth() }
   }
 }
 

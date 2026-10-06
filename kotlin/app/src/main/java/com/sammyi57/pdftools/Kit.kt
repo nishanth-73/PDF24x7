@@ -226,7 +226,8 @@ fun T(
 @Composable
 fun Marquee(text: String, style: TextStyle, color: Color = c.ink, modifier: Modifier = Modifier) {
   BasicText(
-    text, modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200, repeatDelayMillis = 1200),
+    // Two passes, then still: a marquee that never ends redraws the whole screen every frame, and stutters.
+    text, modifier.basicMarquee(iterations = 2, initialDelayMillis = 1200, repeatDelayMillis = 1200),
     style.copy(color = color), maxLines = 1,
   )
 }
