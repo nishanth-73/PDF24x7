@@ -480,7 +480,7 @@ private fun ColumnScope.DriveFiles(query: String, folder: String?, onOpenFolder:
       byDay(shown) { it.modified }.forEachIndexed { gi, (label, items) ->
         val ids = items.map { it.id }
         val allOn = picked != null && ids.all { picked!!.contains(it) }
-        GroupLabel(label, if (picked != null) (if (allOn) "Deselect" else "Select all") else null, { toggle(ids, !allOn) }, first = gi == 0 && folders.isEmpty())
+        GroupLabel(label, if (picked != null) (if (allOn) "Deselect" else "Select all") else null, { toggle(ids, !allOn) })
         Group {
           items.forEachIndexed { i, f ->
             val here = Backup.isOnPhone(f)
