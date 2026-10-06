@@ -197,13 +197,15 @@ private fun Stat(label: String, value: String) {
   }
 }
 
-// The same orange gradient as the hero, kept compact: small label, one line per file, a small round share button.
+// A blue panel under the warm hero, shaped like it (near-black at the top into blue at the bottom), kept compact:
+// small label, one line per file, a small round share button.
+private val RecentBlue = listOf(Color(0xFF02081C), Color(0xFF0D2A6B), Color(0xFF2361C9))
 
 @Composable
 private fun RecentPanel(recent: List<Saved>, onAll: () -> Unit) {
   val shape = RoundedCornerShape(Radius.card)
   val dim = Color.White.copy(alpha = 0.7f)
-  Column(Modifier.padding(top = 12.dp).fillMaxWidth().clip(shape).background(Brush.verticalGradient(c.hero), shape).padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 6.dp)) {
+  Column(Modifier.padding(top = 12.dp).fillMaxWidth().clip(shape).background(Brush.verticalGradient(RecentBlue), shape).padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 6.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       T("Recent", Type.bold, Color.White, Modifier.weight(1f))
       T("All files", Type.small, dim, Modifier.tap(scaleTo = 0.92f, onClick = onAll).padding(horizontal = 6.dp, vertical = 2.dp))
@@ -218,7 +220,7 @@ private fun RecentPanel(recent: List<Saved>, onAll: () -> Unit) {
           T("${kindOf(f.name).name.uppercase()} · ${fmtSize(f.size)} · ${fmtDate(f.modified)}", Type.small.copy(fontSize = 11.5.sp, lineHeight = 15.sp), dim, maxLines = 1)
         }
         Spacer(Modifier.size(8.dp))
-        RoundBtn(I.shareVariantOutline, Color.White, c.hero[1], 34.dp, "Share") { share(f.path, f.name) }
+        RoundBtn(I.shareVariantOutline, Color.White, RecentBlue[1], 34.dp, "Share") { share(f.path, f.name) }
       }
     }
   }
