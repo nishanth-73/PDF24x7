@@ -127,8 +127,15 @@ private fun Hero(files: List<Saved>, onScan: () -> Unit) {
     appendInlineContent("cam", "[camera]")
     withStyle(SpanStyle(color = Color.White)) { append(" scan?") }
   }
+  // Sized from the font, not fixed dp, so it scales with the text. The glyph's body spans 4..20 of its 24 box: dropping
+  // it by 4/24 of its size puts the camera on the baseline, as tall as a capital.
+  val em = with(androidx.compose.ui.platform.LocalDensity.current) { Type.hero.fontSize.toDp() }
   val inline = mapOf(
-    "cam" to InlineTextContent(Placeholder(1.05.em, 1.em, PlaceholderVerticalAlign.TextCenter)) { Icon(I.cameraOutline, 22.dp, Color.White) },
+    "cam" to InlineTextContent(Placeholder(1.1.em, 1.em, PlaceholderVerticalAlign.AboveBaseline)) {
+      Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Icon(I.cameraOutline, em * 1.05f, Color.White, Modifier.offset(y = em * 1.05f * 4 / 24))
+      }
+    },
   )
   Column(
     Modifier.padding(top = 16.dp).fillMaxWidth().tap(shape = shape, scaleTo = 0.98f, label = "Scan a document", onClick = onScan)
