@@ -253,7 +253,8 @@ object Backup {
 
   // Files downloaded from Files → Google Drive while a sync may be running. That sync listed the phone before they
   // arrived, so it links them as they are and leaves them alone, instead of the download waiting for it to finish.
-  private val justDownloaded = java.util.concurrent.ConcurrentHashMap<String, Synced>()
+  // Typed as a Kotlin Map so `in` checks keys (ConcurrentHashMap.contains looks at values).
+  private val justDownloaded: MutableMap<String, Synced> = java.util.concurrent.ConcurrentHashMap()
   @Volatile private var again = false
   private var timer: Job? = null
 
