@@ -1,6 +1,12 @@
 package com.sammyi57.pdftools
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +57,9 @@ fun Home() {
   val searching = tokens.isNotEmpty()
   val tools = if (searching) TOOLS.filter { matches("${it.title} ${it.desc}", tokens) } else TOOLS
   val found = if (searching) files.filter { matches(it.name, tokens) } else emptyList()
+  // Sections with something to show besides the camera (the hero card already opens it).
+  val sections = remember { SECTIONS.indices.filter { si -> TOOLS.any { it.section == si && it.id != "scan" } } }
+  var section by rememberSaveable { mutableStateOf(-1) } // -1: every section
 
   Screen {
     LargeTitle("Tools", "${TOOLS.size} tools. Everything runs on this phone.")
@@ -59,6 +68,13 @@ fun Home() {
     if (!searching) {
       Stagger(0) { Hero(files) { nav.scan() } }
       if (files.isNotEmpty()) Stagger(1) { RecentPanel(files.take(3)) { nav.show(Tab.Files) } }
+      Row(
+        Modifier.padding(top = 22.dp).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Chip("All tools", section == -1) { section = -1 }
+        sections.forEach { si -> Chip(SECTIONS[si], section == si) { section = si } }
+      }
     }
 
     if (found.isNotEmpty()) {
@@ -74,19 +90,13 @@ fun Home() {
     }
 
     SECTIONS.forEachIndexed { si, name ->
+      if (!searching && section != -1 && section != si) return@forEachIndexed
       val items = tools.filter { it.section == si && (searching || it.id != "scan") }
       if (items.isEmpty()) return@forEachIndexed
       Stagger(si + 2) {
         Column {
-          GroupLabel(name)
-          Group {
-            items.forEachIndexed { i, t ->
-              ListRow(
-                t.title, first = i == 0, subtitle = t.desc, chevron = true,
-                lead = { ArtTile(t.id, modifier = Modifier.sharedArt(t.id)) }, onClick = { nav.tool(t.id) },
-              )
-            }
-          }
+          GroupLabel("$name · ${items.size}")
+          ToolGrid(items) { nav.tool(it.id) }
         }
       }
     }
@@ -110,32 +120,14 @@ private fun Hero(files: List<Saved>, onScan: () -> Unit) {
   val today = files.count { dayLabel(it.modified).startsWith("Today") }
   val bytes = files.sumOf { it.size }
   val soft = Color(0xFFFFD9C6)
+  // Short on purpose: the numbers sit in the stats row below, so the sentence only says hello and points at the camera.
   val sentence = buildAnnotatedString {
     withStyle(SpanStyle(color = Color.White)) { append(greeting()) }
-    withStyle(SpanStyle(color = soft)) {
-      if (files.isEmpty()) {
-        append(" Scan a page ")
-        appendInlineContent("cam", "[camera]")
-        append(" and it becomes a PDF, ")
-        withStyle(SpanStyle(color = Color.White)) { append("right here on your phone.") }
-      } else {
-        append(" You have ")
-        appendInlineContent("doc", "[file]")
-        withStyle(SpanStyle(color = Color.White)) { append(" ${plural(files.size, "file")}") }
-        append(" saved")
-        if (today > 0) {
-          append(", ")
-          withStyle(SpanStyle(color = Color.White)) { append("$today made today") }
-        }
-        append(". Ready to ")
-        appendInlineContent("cam", "[camera]")
-        withStyle(SpanStyle(color = Color.White)) { append(" scan") }
-        append(" more?")
-      }
-    }
+    withStyle(SpanStyle(color = soft)) { append(" Ready to ") }
+    appendInlineContent("cam", "[camera]")
+    withStyle(SpanStyle(color = Color.White)) { append(" scan?") }
   }
   val inline = mapOf(
-    "doc" to InlineTextContent(Placeholder(1.05.em, 1.em, PlaceholderVerticalAlign.TextCenter)) { Icon(I.fileDocumentOutline, 22.dp, Color.White) },
     "cam" to InlineTextContent(Placeholder(1.05.em, 1.em, PlaceholderVerticalAlign.TextCenter)) { Icon(I.cameraOutline, 22.dp, Color.White) },
   )
   Column(
@@ -168,6 +160,32 @@ private fun Hero(files: List<Saved>, onScan: () -> Unit) {
         Icon(I.arrowRight, 16.dp, Color(0xFF1A0503))
       }
     }
+  }
+}
+
+// Two cards a row, each the height of the taller one, so titles and descriptions line up across the grid.
+@Composable
+private fun ToolGrid(items: List<Tool>, onOpen: (Tool) -> Unit) {
+  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    items.chunked(2).forEach { pair ->
+      Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        pair.forEach { t -> ToolCard(t, Modifier.weight(1f)) { onOpen(t) } }
+        if (pair.size == 1) Spacer(Modifier.weight(1f))
+      }
+    }
+  }
+}
+
+@Composable
+private fun ToolCard(t: Tool, modifier: Modifier, onClick: () -> Unit) {
+  val shape = RoundedCornerShape(Radius.group)
+  Column(
+    modifier.fillMaxHeight().tap(shape = shape, scaleTo = 0.96f, label = t.title, onClick = onClick)
+      .background(c.surface, shape).border(0.6.dp, c.lineStrong, shape).padding(14.dp),
+  ) {
+    ArtTile(t.id, 46.dp, Modifier.sharedArt(t.id))
+    T(t.title, Type.bold, modifier = Modifier.padding(top = 12.dp), maxLines = 2)
+    T(t.desc, Type.small.copy(fontSize = 12.sp, lineHeight = 17.sp), c.sub, Modifier.padding(top = 4.dp), maxLines = 2)
   }
 }
 

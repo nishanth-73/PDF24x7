@@ -268,8 +268,8 @@ private fun ResumeBar(tool: Tool, files: Int) {
   }
 }
 
-// The floating pill from the reference, in frosted glass: the page blurs behind it, a white circle slides to the open
-// tab, and the camera sits in accent red.
+// The floating pill from the reference, in frosted glass: the page blurs behind it and a wide orange capsule slides to
+// the open tab. The camera is one more icon in the row; it opens the scanner instead of a tab, so it never lights up.
 @Composable
 private fun NavPill(haze: HazeState) {
   val nav = LocalNav.current
@@ -277,8 +277,9 @@ private fun NavPill(haze: HazeState) {
   val labels = listOf("Tools", "Scan a document", "Files", "Settings")
   val pill = CircleShape
   val glass = c.panel
+  val onActive = Color(0xFF1A0503)
   BoxWithConstraints(
-    Modifier.padding(horizontal = 32.dp).fillMaxWidth().height(62.dp).shadow(10.dp, pill, ambientColor = Color.Black, spotColor = Color.Black)
+    Modifier.padding(horizontal = 28.dp).fillMaxWidth().height(62.dp).shadow(10.dp, pill, ambientColor = Color.Black, spotColor = Color.Black)
       .clip(pill)
       .hazeEffect(haze) {
         blurRadius = 24.dp
@@ -289,25 +290,18 @@ private fun NavPill(haze: HazeState) {
       .border(0.6.dp, Color.White.copy(alpha = 0.14f), pill).padding(6.dp),
   ) {
     val slot = maxWidth / slots.size
+    val capsule = minOf(slot - 4.dp, 76.dp)
     val active = slots.indexOfFirst { it.first == nav.tab }
-    val x by animateDpAsState(slot * active + (slot - 50.dp) / 2, spring(0.72f, Spring.StiffnessMediumLow), label = "pill")
-    Box(Modifier.offset(x = x).size(50.dp).background(c.onPanel, CircleShape))
+    val x by animateDpAsState(slot * active + (slot - capsule) / 2, spring(0.72f, Spring.StiffnessMediumLow), label = "pill")
+    Box(Modifier.offset(x = x).size(capsule, maxHeight).background(c.accent, CircleShape))
     Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
       slots.forEachIndexed { i, (tab, glyph) ->
-        Box(Modifier.width(slot).fillMaxSize(), contentAlignment = Alignment.Center) {
-          if (tab == null) {
-            Box(
-              Modifier.size(46.dp).tap(shape = CircleShape, scaleTo = 0.86f, label = labels[i]) { nav.scan() }.background(c.accent, CircleShape),
-              contentAlignment = Alignment.Center,
-            ) { Icon(glyph, 18.dp, Color.White, label = labels[i]) }
-          } else {
-            val on = nav.tab == tab
-            val tint by androidx.compose.animation.animateColorAsState(if (on) c.panel else c.onPanelSub, tween(220), label = "tint")
-            Box(Modifier.size(50.dp).tap(shape = CircleShape, scaleTo = 0.86f, label = labels[i]) { nav.show(tab) }, contentAlignment = Alignment.Center) {
-              Icon(glyph, 17.dp, tint, label = labels[i])
-            }
-          }
-        }
+        val on = tab != null && nav.tab == tab
+        val tint by androidx.compose.animation.animateColorAsState(if (on) onActive else c.onPanel.copy(alpha = 0.78f), tween(220), label = "tint")
+        Box(
+          Modifier.width(slot).fillMaxSize().tap(shape = CircleShape, scaleTo = 0.86f, label = labels[i]) { if (tab == null) nav.scan() else nav.show(tab) },
+          contentAlignment = Alignment.Center,
+        ) { Icon(glyph, if (on) 19.dp else 18.dp, tint, label = labels[i]) }
       }
     }
   }
