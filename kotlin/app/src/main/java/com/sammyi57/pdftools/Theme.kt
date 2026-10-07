@@ -54,7 +54,7 @@ val DarkPalette = Palette(
   ink = Color(0xFFEDEDED), sub = Color(0xFFA1A1A1), faint = Color(0xFF6B6B6B), line = Color(0xFF242424),
   lineStrong = Color(0xFF363636), accent = Color(0xFFE5694B), accentSoft = Color(0xFF2B1B17), accentInk = Color(0xFFF2B8A6),
   onInk = Color(0xFF0A0A0A),
-  hero = listOf(Color(0xFF2A0603), Color(0xFF8E2412), Color(0xFFD9772A)),
+  hero = listOf(Color(0xFF4A0E06), Color(0xFFA32B15), Color(0xFFE5822D)), // lifted at the top, so it doesn't sink into the black page
   panel = Color(0xFF1B1B1B), onPanel = Color(0xFFF2F2F2), onPanelSub = Color(0xFF8A8A8A),
   dark = true,
 )
