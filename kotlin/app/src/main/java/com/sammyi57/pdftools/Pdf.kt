@@ -442,8 +442,10 @@ fun watermark(bytes: ByteArray, typed: String, opacity: Float, scale: Float): By
   return loadPdf(bytes).use { doc ->
     val font = PDType1Font.HELVETICA_BOLD
     for (p in doc.pages) {
-      val width = p.mediaBox.width
-      val height = p.mediaBox.height
+      // Centred on what a viewer shows (the crop box), as the preview is, not on the full media box.
+      val cb = p.cropBox
+      val width = cb.width
+      val height = cb.height
       val l = watermarkLayout(text, width, height, scale)
       val cs = cos(l.angle)
       val sn = sin(l.angle)
@@ -451,7 +453,10 @@ fun watermark(bytes: ByteArray, typed: String, opacity: Float, scale: Float): By
       doc.draw(p) {
         alpha(doc, opacity)
         setNonStrokingColor(0.82f, 0.27f, 0.17f)
-        putText(font, l.size, text, width / 2 - cs * l.textWidth / 2 + sn * up, height / 2 - sn * l.textWidth / 2 - cs * up, (l.angle * 180 / PI).toFloat())
+        putText(
+          font, l.size, text, cb.lowerLeftX + width / 2 - cs * l.textWidth / 2 + sn * up,
+          cb.lowerLeftY + height / 2 - sn * l.textWidth / 2 - cs * up, (l.angle * 180 / PI).toFloat(),
+        )
       }
     }
     doc.bytes()
@@ -565,8 +570,10 @@ fun fillSign(bytes: ByteArray, items: List<SignItem>, images: Map<String, ByteAr
     if (it.page !in 0 until doc.numberOfPages) continue
     val p = doc.getPage(it.page)
     val rot = p.rot
-    val W = p.mediaBox.width
-    val H = p.mediaBox.height
+    // Item fractions are of the page as the editor shows it: the crop box, so a cropped page lines up too.
+    val cb = p.cropBox
+    val W = cb.width
+    val H = cb.height
     val (dw, dh) = if (rot % 180 != 0) H to W else W to H // the page as displayed, which item fractions are of
     val op = it.opacity.coerceIn(0.05f, 1f)
     if (it.kind == "image") {
@@ -584,7 +591,7 @@ fun fillSign(bytes: ByteArray, items: List<SignItem>, images: Map<String, ByteAr
       val at = placeTurned(it.x, it.y, w, h, 0f, it.angle, rot, W, H)
       doc.draw(p) {
         alpha(doc, op)
-        transform(Matrix.getTranslateInstance(at.x, at.y))
+        transform(Matrix.getTranslateInstance(cb.lowerLeftX + at.x, cb.lowerLeftY + at.y))
         transform(Matrix.getRotateInstance(Math.toRadians(at.rotate.toDouble()), 0f, 0f))
         drawImage(img, 0f, 0f, w, h)
       }
@@ -600,7 +607,7 @@ fun fillSign(bytes: ByteArray, items: List<SignItem>, images: Map<String, ByteAr
     doc.draw(p) {
       alpha(doc, op)
       setNonStrokingColor(r, g, b)
-      putText(font, size, text, at.x, at.y, at.rotate)
+      putText(font, size, text, cb.lowerLeftX + at.x, cb.lowerLeftY + at.y, at.rotate)
     }
   }
   doc.bytes()

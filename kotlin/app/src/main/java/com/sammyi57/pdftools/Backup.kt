@@ -198,19 +198,23 @@ object Backup {
   // `modified` (Drive's modifiedTime) becomes the file's date, so Files sorts it by when it was made, not downloaded.
   private suspend fun downloadFromDrive(token: String, id: String, dest: File, modified: String? = null) {
     dest.parentFile?.mkdirs()
-    val tmp = File(appContext.cacheDir, "drive-$id.part")
-    retry {
-      val conn = open(token, "$API/files/$id?alt=media", "GET")
-      try {
-        if (conn.responseCode !in 200..299) throw DriveError(conn.responseCode, "")
-        conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it, 256 * 1024) } }
-      } finally {
-        conn.disconnect()
+    val tmp = File(appContext.cacheDir, "drive-$id-${System.nanoTime()}.part") // per download: two of one file can't share it
+    try {
+      retry {
+        val conn = open(token, "$API/files/$id?alt=media", "GET")
+        try {
+          if (conn.responseCode !in 200..299) throw DriveError(conn.responseCode, "")
+          conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it, 256 * 1024) } }
+        } finally {
+          conn.disconnect()
+        }
       }
+      if (dest.exists()) dest.delete() // only replaced once the download fully succeeded
+      if (!tmp.renameTo(dest)) tmp.copyTo(dest, true)
+      modified?.let { dest.setLastModified(parseTime(it)) }
+    } finally {
+      tmp.delete() // a failed download leaves no partial file behind
     }
-    if (dest.exists()) dest.delete() // only replaced once the download fully succeeded
-    if (!tmp.renameTo(dest)) { tmp.copyTo(dest, true); tmp.delete() }
-    modified?.let { dest.setLastModified(parseTime(it)) }
   }
 
   private fun parseTime(iso: String): Long = try { java.time.Instant.parse(iso).toEpochMilli() } catch (_: Exception) { 0L }
@@ -268,14 +272,17 @@ object Backup {
   /** Runs a full two-way sync now. Concurrent calls share one run; changes made meanwhile trigger one more. */
   fun syncNow(): Deferred<Unit> = synchronized(this) {
     running?.also { again = true } ?: scope.async {
+      var done = false
       try {
-        do {
+        while (!done) {
           again = false
           syncOnce()
-        } while (again)
+          // "Again?" and "finished" are one step under the lock, so a change arriving as a run ends either reruns it or
+          // starts a new run: never lost in between.
+          done = synchronized(this@Backup) { if (again) false else { running = null; syncing = false; true } }
+        }
       } finally {
-        synchronized(this@Backup) { running = null }
-        syncing = false
+        if (!done) synchronized(this@Backup) { running = null; syncing = false }
       }
     }.also { running = it }
   }
@@ -680,7 +687,9 @@ object Backup {
     withToken(email) { token ->
       // Under its id, so same-named files from different folders don't overwrite each other.
       val dest = File(appContext.cacheDir, "drive/${f.id}/${cleanName(f.name)}")
-      if (!dest.exists() || dest.length() != f.size) downloadFromDrive(token, f.id, dest)
+      // Fetched again when Drive has a newer version, even one of the same size: the copy carries Drive's date.
+      val stale = !dest.exists() || dest.length() != f.size || kotlin.math.abs(dest.lastModified() - f.modified) > 1000
+      if (stale) downloadFromDrive(token, f.id, dest, f.modifiedTime)
       Picked(f.name, dest.path, dest.length())
     }
   }
@@ -705,7 +714,7 @@ object Backup {
       val id = folders[old] ?: throw UserError("This folder is no longer in Drive.")
       call(token, "$API/files/$id", "PATCH", JSONObject().put("name", name))
     }
-    phoneFolder(old)?.takeIf { it.exists() }?.renameTo(target)
+    phoneFolder(old)?.takeIf { it.exists() && it.renameTo(target) }?.let { relinkFolder(it.path, target.path) }
     val move = { rel: String -> splitRel(rel).let { (dir, file) -> if (dir == old) "$name/$file" else rel } }
     update { x -> if (x.email != email) x else x.copy(entries = x.entries.mapKeys { move(it.key) }, driveOnly = x.driveOnly.mapKeys { move(it.key) }, folders = x.folders.mapKeys { if (it.key == old) name else it.key }) }
     listing?.let { (e, d) -> remember(e, DriveListing(d.folders.map { if (it == old) name else it }, d.files.map { if (it.folder == old) it.copy(folder = name) else it })) }

@@ -107,7 +107,12 @@ fun FilesTab() {
   }
   val deleteFolder = { f: Folder, count: Int ->
     val paths = listFiles(f.path).map { it.path }
-    if (Backup.hasDriveCopies(paths)) deleteChoice = DeleteChoice("Delete folder?", "\"${f.name}\" and ${plural(count, "file")} inside", paths) { removeFolder(f.path) }
+    // Both sides: the whole Drive folder goes to the Trash, Drive-only files too, not just the copies sync linked.
+    val both = {
+      scope.launch { try { Backup.deleteFolder(f.name) } catch (e: Exception) { Backup.update { it.copy(error = Backup.describe(e)) } } }
+      Unit
+    }
+    if (Backup.hasDriveCopies(paths)) deleteChoice = DeleteChoice("Delete folder?", "\"${f.name}\" and ${plural(count, "file")} inside", paths, both) { removeFolder(f.path) }
     else confirm = ConfirmSpec("Delete folder?", "\"${f.name}\" and ${if (count == 0) "any files inside" else "${plural(count, "file")} inside"} will be permanently deleted.") { removeFolder(f.path) }
   }
 
@@ -233,7 +238,7 @@ fun FilesTab() {
     AppDialog({ deleteChoice = null }, d.title, "${d.what} ${if (d.paths.size > 1) "are" else "is"} also in your Google Drive.") {
       Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Btn("Delete from this phone only", Modifier.fillMaxWidth(), I.cellphoneRemove, BtnKind.Secondary) { Backup.keepInDriveOnly(d.paths); d.remove(); deleteChoice = null }
-        Btn("Delete from phone and Drive", Modifier.fillMaxWidth(), I.deleteOutline, BtnKind.Danger) { d.remove(); deleteChoice = null }
+        Btn("Delete from phone and Drive", Modifier.fillMaxWidth(), I.deleteOutline, BtnKind.Danger) { (d.removeBoth ?: d.remove)(); deleteChoice = null }
         T(
           "Phone only keeps the Drive copy; you can download it again from Files → Google Drive. Phone and Drive moves the Drive copy to Drive's Trash for 30 days.",
           Type.small, c.sub, align = TextAlign.Center,
@@ -308,7 +313,7 @@ private fun FolderCard(name: String, count: Int, onOpen: () -> Unit, onMore: () 
 
 private class PromptSpec(val title: String, val subtitle: String, val placeholder: String, val initial: String, val submit: String, val run: (String) -> Unit)
 private class ConfirmSpec(val title: String, val message: String, val run: () -> Unit)
-private class DeleteChoice(val title: String, val what: String, val paths: List<String>, val remove: () -> Unit)
+private class DeleteChoice(val title: String, val what: String, val paths: List<String>, val removeBoth: (() -> Unit)? = null, val remove: () -> Unit)
 
 // Files → Save as Word doc / Save as JPEG: converts, then offers where else the result should go.
 @Composable

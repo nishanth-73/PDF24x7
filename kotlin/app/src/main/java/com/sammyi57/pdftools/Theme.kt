@@ -45,7 +45,7 @@ val LightPalette = Palette(
   lineStrong = Color(0xFFD4D4D1), accent = Color(0xFFC9442A), accentSoft = Color(0xFFFBE4DD), accentInk = Color(0xFF7C2613),
   onInk = Color(0xFFFFFFFF),
   hero = listOf(Color(0xFF3A0904), Color(0xFFB02E17), Color(0xFFEF8A2E)),
-  panel = Color(0xFF111111), onPanel = Color(0xFFFFFFFF), onPanelSub = Color(0xFF9B9B9B),
+  panel = Color(0xFF3A0904), onPanel = Color(0xFFFFFFFF), onPanelSub = Color(0xFFD9B3A8), // deep wine, the hero's top
   dark = false,
 )
 

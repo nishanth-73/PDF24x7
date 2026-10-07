@@ -277,6 +277,8 @@ private fun NavPill(haze: HazeState) {
   val labels = listOf("Tools", "Scan a document", "Files", "Settings")
   val pill = CircleShape
   val glass = c.panel
+  // Light mode holds a bit more colour so the wine reads over a white page, but stays see-through for the blur.
+  val glassAlpha = if (c.dark) 0.5f else 0.6f
   val onActive = Color(0xFF1A0503)
   BoxWithConstraints(
     Modifier.padding(horizontal = 28.dp).fillMaxWidth().height(62.dp).shadow(10.dp, pill, ambientColor = Color.Black, spotColor = Color.Black)
@@ -284,7 +286,7 @@ private fun NavPill(haze: HazeState) {
       .hazeEffect(haze) {
         blurRadius = 24.dp
         backgroundColor = glass
-        tints = listOf(HazeTint(glass.copy(alpha = 0.5f)))
+        tints = listOf(HazeTint(glass.copy(alpha = glassAlpha)))
         noiseFactor = 0.08f
       }
       .border(0.6.dp, Color.White.copy(alpha = 0.14f), pill).padding(6.dp),

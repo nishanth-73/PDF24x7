@@ -161,10 +161,10 @@ suspend fun exportPdf(doc: ScanDoc): ScanDoc = withContext(Dispatchers.IO) {
     layoutScanPage(p.kind, p.size, p.shots.map { it.shownW to it.shownH }).map { s -> s.copy(items = s.items.map { it.copy(img = first + it.img) }) }
   }
   val tmp = buildScanPdf(sheets, images)
-  // Replace the earlier PDF wherever it is now (the user may have moved it into a folder in Files).
-  val all = if (doc.pdf != null) listAllFiles() else emptyList()
-  val old = doc.pdf?.let { pdf -> all.find { it.path == pathOf(pdf.path) } ?: all.find { it.name == pdf.name } }
-  val folder = old?.let { File(it.path).parent }
+  // Replace the earlier PDF wherever it is now: moves and renames in Files keep `pdf` pointing at it. Only ever that
+  // exact file: if it's gone, the new PDF is saved fresh rather than replacing some other file with the same name.
+  val old = doc.pdf?.let { File(pathOf(it.path)) }?.takeIf { it.isFile }
+  val folder = old?.parent
   if (old != null) removeFile(old.path)
   val file = adoptTemp(tmp, doc.name, "pdf", folder)
   val next = doc.copy(pdf = PdfRef(file.path, file.name), saved = SavedScan(doc.name, doc.pages))
@@ -180,6 +180,15 @@ fun relinkPdf(oldPath: String, pdf: Saved) {
   val clean = doc.saved != null && !doc.isDirty() // a saved scan stays "Saved" rather than turning into "Unsaved changes"
   val next = doc.copy(name = name, pdf = PdfRef(pdf.path, pdf.name))
   saveDoc(if (clean) next.copy(saved = doc.saved!!.copy(name = name)) else next)
+}
+
+/** After a folder in Files is renamed: scans whose PDF is inside it follow it there. */
+fun relinkFolder(oldDir: String, newDir: String) {
+  for (doc in listDocs()) {
+    val pdf = doc.pdf ?: continue
+    val p = pathOf(pdf.path)
+    if (p.startsWith(oldDir + File.separator)) saveDoc(doc.copy(pdf = pdf.copy(path = newDir + p.substring(oldDir.length))))
+  }
 }
 
 /** The most recent scan with unsaved work, to offer "Continue" when the scanner opens. */

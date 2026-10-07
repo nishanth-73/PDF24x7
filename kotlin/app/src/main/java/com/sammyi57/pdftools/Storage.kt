@@ -66,7 +66,7 @@ fun renameFolder(path: String, newName: String) {
   if (clean.isEmpty() || !d.exists() || d.name == clean) return
   val target = File(rootFolder(), clean)
   if (target.exists()) return // avoid collision with an existing folder
-  d.renameTo(target)
+  if (d.renameTo(target)) relinkFolder(d.path, target.path)
   Store.changed()
 }
 
@@ -101,15 +101,16 @@ private fun freeFile(base: String, ext: String, dir: File = rootFolder()): File 
   return f
 }
 
-private fun moveInto(f: File, dir: File) {
+private fun moveInto(f: File, dir: File): File {
   val dot = f.name.lastIndexOf('.')
   val target = freeFile(if (dot > 0) f.name.substring(0, dot) else f.name, if (dot > 0) f.name.substring(dot + 1) else "pdf", dir)
   if (!f.renameTo(target)) { f.copyTo(target); f.delete() }
+  return target
 }
 
 fun moveFile(path: String, folderPath: String) {
   val f = File(path).takeIf { it.exists() } ?: return
-  moveInto(f, File(folderPath))
+  relinkPdf(path, moveInto(f, File(folderPath)).toSaved()) // a scan's PDF stays linked to its scan wherever it goes
   Store.changed()
 }
 
