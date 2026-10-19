@@ -1,54 +1,18 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
-node_modules/
-
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
-
-# Native
+# Gradle and Kotlin build output
+.gradle/
 .kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
+build/
+app/build/
 
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
-
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/ios
-/android
-
-# IDE specific
-.claude/
-.vscode/
+# Local machine settings (SDK path) and IDE files
+local.properties
+*.iml
 .idea/
+.DS_Store
 
-# Expo native module builds
-modules/**/android/build/
-modules/**/android/.cxx/
-modules/**/android/.gradle/
-modules/**/ios/build/
-modules/**/ios/Pods/
-modules/**/ios/*.xcworkspace/
+# Signing keys and secrets (the upload key lives in ~/.gradle/gradle.properties, never here)
+*.jks
+*.p12
+*.pem
+*.key
+keystore.properties

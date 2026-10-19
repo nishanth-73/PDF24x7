@@ -6,19 +6,22 @@ import os
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FONT = os.path.join(HERE, "..", "kotlin", "app", "src", "main", "res", "font", "poppins_semibold.ttf")
+FONT = os.path.join(HERE, "..", "app", "src", "main", "res", "font", "poppins_semibold.ttf")
 OUT = os.path.join(HERE, "play")
 W, H = 1440, 2560
 
-ORANGE, RED, MAROON, BLUE, CREAM, INK = "#EF8A2E", "#B02E17", "#3A0904", "#2361C9", "#FBE4DD", "#1A0503"
+# The app's brand: Tangerine, Black Cherry, Cool Blue, on warm paper.
+TANGERINE, CHERRY, COOL, PAPER, NIGHT, SOFT = "#FF5C34", "#351E28", "#D7EFFF", "#F6F2EE", "#1C1B19", "#FFE4DB"
+TOOL_COUNT = 24
 
 # (screenshot, background, text colour, doodle colour, headline lines, slogan, doodle, the word it marks)
 SLIDES = [
-    ("01-home.png", ORANGE, INK, INK, ["22 PDF tools", "in your pocket"], "100% free. No ads. No sign-up.", "circle", (0, "22")),
-    ("11-scanner.png", BLUE, "#FFFFFF", "#FFFFFF", ["Scan documents", "in a snap"], "Documents, books, ID cards, whiteboards.", "sparkle", (1, "snap")),
-    ("07-tool-merge.png", MAROON, "#FFFFFF", ORANGE, ["Merge, split", "& compress"], "22 tools, free forever. Zero ads.", "circle", (0, "split")),
-    ("03-files-phone.png", RED, "#FFFFFF", "#FFD9C6", ["All your files,", "synced to Drive"], "Backed up to your own Google Drive.", "underline", (1, "Drive")),
-    ("04-settings.png", CREAM, MAROON, RED, ["Private by", "design"], "Works offline. No tracking. No ads.", "check", (1, "design")),
+    ("01-home.png", TANGERINE, CHERRY, CHERRY, [f"{TOOL_COUNT} PDF tools", "in your pocket"], "100% free. No ads. No sign-up.", "underline", (0, f"{TOOL_COUNT} PDF tools")),
+    ("11-scanner.png", CHERRY, "#FFFFFF", TANGERINE, ["Scan documents", "in a snap"], "Searchable scans of docs, books and IDs.", "sparkle", (1, "snap")),
+    ("07-tool-merge.png", COOL, CHERRY, TANGERINE, ["Merge, split", "& compress"], f"{TOOL_COUNT} tools, free forever. Zero ads.", "circle", (0, "split")),
+    ("12-viewer.png", PAPER, CHERRY, TANGERINE, ["Read, search", "& copy text"], "A fast PDF viewer, built right in.", "underline", (1, "copy")),
+    ("03-files-phone.png", NIGHT, "#FFFFFF", TANGERINE, ["All your files,", "synced to Drive"], "Backed up to your own Google Drive.", "underline", (1, "Drive")),
+    ("04-settings.png", SOFT, CHERRY, TANGERINE, ["Private by", "design"], "Works offline. No tracking. No ads.", "check", (1, "design")),
 ]
 
 LEFT, TOP, LEAD = 112, 150, 1.12
@@ -191,21 +194,101 @@ def slide(i, shot, bg, ink, mark, lines, slogan, kind, target):
         d.text((LEFT, TOP + n * SIZE * LEAD), text, font=font, fill=ink)
     d.text((LEFT + 4, sub_y), slogan, font=sub_font, fill=ink)
     doodle(d, kind, word_box(lines, *target), mark)
-    canvas.convert("RGB").save(os.path.join(OUT, f"{i + 1:02d}-{os.path.splitext(shot)[0].split('-', 1)[1]}.png"), optimize=True)
+    path = os.path.join(OUT, f"{i + 1:02d}-{os.path.splitext(shot)[0].split('-', 1)[1]}.png")
+    canvas.convert("RGB").save(path, optimize=True)
+    return path
 
 
 os.makedirs(OUT, exist_ok=True)
 for old in os.listdir(OUT):
     os.remove(os.path.join(OUT, old))
-for i, s in enumerate(SLIDES):
-    slide(i, *s)
+made = [slide(i, *s) for i, s in enumerate(SLIDES)]
 
 # All five side by side as rounded cards on a dark strip, for a banner or a quick look at the set.
 CW, GAP, PAD = 720, 40, 60
 CH = CW * H // W
 banner = Image.new("RGB", (PAD * 2 + len(SLIDES) * CW + (len(SLIDES) - 1) * GAP, PAD * 2 + CH), "#141414")
-for i, name in enumerate(sorted(os.listdir(OUT))):
-    card = Image.open(os.path.join(OUT, name)).convert("RGBA").resize((CW, CH), Image.LANCZOS)
+for i, path in enumerate(made):
+    card = Image.open(path).convert("RGBA").resize((CW, CH), Image.LANCZOS)
     banner.paste(card, (PAD + i * (CW + GAP), PAD), mask_rr((CW, CH), 44))
-banner.save(os.path.join(HERE, "store-banner.png"), optimize=True)
+banner.save(os.path.join(OUT, "banner.png"), optimize=True)
+
+
+def feature_graphic():
+    """
+    Google Play's 1024x500 feature graphic, drawn at twice the size and scaled down so type and edges stay crisp:
+    Black Cherry with a soft Tangerine glow and grain, the name and a two-line promise on the left, and three phones
+    fanned out on the right (Home in front, Merge and the viewer tilted behind), running off the bottom edge.
+    """
+    K = 2
+    FW, FH = 1024 * K, 500 * K
+    g = Image.new("RGBA", (FW, FH), CHERRY)
+
+    def glow(cx, cy, r, rgb, alpha):
+        layer = Image.new("RGBA", (FW, FH), (0, 0, 0, 0))
+        ImageDraw.Draw(layer).ellipse([cx - r, cy - r, cx + r, cy + r], fill=rgb + (alpha,))
+        return layer.filter(ImageFilter.GaussianBlur(r * 0.45))
+
+    g.alpha_composite(glow(1720, 1080, 760, (0xFF, 0x5C, 0x34), 240))  # Tangerine from the bottom right
+    g.alpha_composite(glow(120, -160, 520, (0xD7, 0xEF, 0xFF), 38))  # a breath of Cool Blue, top left
+
+    def phone_with_shadow(shot, height, angle):
+        p = device(shot, height).rotate(angle, resample=Image.BICUBIC, expand=True)
+        sh = Image.new("RGBA", p.size, (0, 0, 0, 0))
+        sh.putalpha(p.getchannel("A").point(lambda a: a * 0.55))
+        pad = 80
+        out = Image.new("RGBA", (p.width + pad * 2, p.height + pad * 2), (0, 0, 0, 0))
+        out.alpha_composite(sh.filter(ImageFilter.GaussianBlur(28)), (pad, pad + 34))
+        out.alpha_composite(p, (pad, pad))
+        return out
+
+    back_l = phone_with_shadow("07-tool-merge.png", 880, 11)
+    back_r = phone_with_shadow("12-viewer.png", 880, -11)
+    front = phone_with_shadow("01-home.png", 1060, 0)
+    g.alpha_composite(back_l, (1250 - back_l.width // 2, 400))
+    g.alpha_composite(back_r, (1770 - back_r.width // 2, 400))
+    g.alpha_composite(front, (1510 - front.width // 2, 250))
+
+    # Grain over everything but the type, like the app's own loud surfaces.
+    import random
+    rnd = random.Random(7)
+    grain = Image.new("L", (FW // 2, FH // 2))
+    grain.putdata([rnd.randrange(0, 22) for _ in range(grain.width * grain.height)])
+    noise = Image.new("RGBA", (FW, FH), (255, 255, 255, 0))
+    noise.putalpha(grain.resize((FW, FH)))
+    g.alpha_composite(noise)
+
+    d = ImageDraw.Draw(g)
+    icon = Image.open(os.path.join(HERE, "..", "app", "src", "main", "res", "mipmap-xxxhdpi", "ic_launcher.webp")).convert("RGBA").resize((128, 128), Image.LANCZOS)
+    g.alpha_composite(icon, (112, 104))
+    d.text((268, 130), "PDF Tools", font=ImageFont.truetype(FONT, 54), fill="#FFFFFF")
+    d.text((270, 196), "Free · Private · On your phone", font=ImageFont.truetype(SUB_FONT, 28), fill=(255, 255, 255, 150))
+
+    head = ImageFont.truetype(FONT, 118)
+    x, y1, y2 = 108, 330, 470
+    d.text((x, y1), "Every PDF tool.", font=head, fill="#FFFFFF")
+    d.text((x, y2), "One ", font=head, fill="#FFFFFF")
+    fx = x + head.getlength("One ")
+    d.text((fx, y2), "free", font=head, fill=TANGERINE)
+    d.text((fx + head.getlength("free "), y2), "app.", font=head, fill="#FFFFFF")
+    # A quick pen swoosh under "free".
+    fw = head.getlength("free")
+    swoosh = [(fx - 6 + t * (fw + 18), y2 + 152 + 12 * math.sin(t * math.pi * 1.5) - t * 10) for t in [i / 60 for i in range(61)]]
+    d.line(swoosh, fill=TANGERINE, width=10, joint="curve")
+    for px, py in (swoosh[0], swoosh[-1]):
+        d.ellipse([px - 5, py - 5, px + 5, py + 5], fill=TANGERINE)
+
+    d.text((112, 690), f"Scan, merge, sign & compress. {TOOL_COUNT} tools.", font=ImageFont.truetype(SUB_FONT, 38), fill=COOL)
+    cf = ImageFont.truetype(FONT, 28)
+    cx = 112
+    for chip in ("No ads", "Works offline", "No sign-up"):
+        w = cf.getlength(chip) + 52
+        d.rounded_rectangle([cx, 786, cx + w, 846], radius=30, outline=(255, 255, 255, 110), width=3)
+        d.text((cx + 26, 797), chip, font=cf, fill="#FFFFFF")
+        cx += w + 16
+
+    g.resize((1024, 500), Image.LANCZOS).convert("RGB").save(os.path.join(OUT, "feature-graphic.png"), optimize=True)
+
+
+feature_graphic()
 print("done:", SIZE, sorted(os.listdir(OUT)), banner.size)
