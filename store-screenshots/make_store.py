@@ -3,6 +3,7 @@
 # buttons, Dynamic Island). Screens are only ever scaled down, so they stay sharp. Run: python make_store.py -> play/
 import math
 import os
+import re
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -200,8 +201,10 @@ def slide(i, shot, bg, ink, mark, lines, slogan, kind, target):
 
 
 os.makedirs(OUT, exist_ok=True)
+# Only what this script makes is replaced: the app icon, the listing text and anything else in here stay.
 for old in os.listdir(OUT):
-    os.remove(os.path.join(OUT, old))
+    if re.match(r"^\d\d-.*\.png$", old) or old in ("overview-strip.png", "banner.png", "feature-graphic.png"):
+        os.remove(os.path.join(OUT, old))
 made = [slide(i, *s) for i, s in enumerate(SLIDES)]
 
 # All five side by side as rounded cards on a dark strip, for a banner or a quick look at the set.
@@ -211,7 +214,7 @@ banner = Image.new("RGB", (PAD * 2 + len(SLIDES) * CW + (len(SLIDES) - 1) * GAP,
 for i, path in enumerate(made):
     card = Image.open(path).convert("RGBA").resize((CW, CH), Image.LANCZOS)
     banner.paste(card, (PAD + i * (CW + GAP), PAD), mask_rr((CW, CH), 44))
-banner.save(os.path.join(OUT, "banner.png"), optimize=True)
+banner.save(os.path.join(OUT, "overview-strip.png"), optimize=True)  # NOT the Play feature graphic: that is feature-graphic.png
 
 
 def feature_graphic():
