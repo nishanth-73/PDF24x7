@@ -335,7 +335,7 @@ private fun NavPill(haze: HazeState) {
 // Whether the terms and privacy policy were accepted on this device. Raising VERSION shows them again after an update.
 object Terms {
   const val VERSION = 2
-  const val UPDATED = "22 September 2026"
+  const val UPDATED = "20 October 2026"
   private val file get() = File(appContext.filesDir, "consent.json") // same file the Expo app used
 
   fun accepted(): Boolean = try {

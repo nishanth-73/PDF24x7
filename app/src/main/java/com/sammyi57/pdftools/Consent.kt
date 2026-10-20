@@ -44,8 +44,8 @@ import kotlinx.coroutines.delay
 // Shown once, before anything else, on a fresh install, and again from Settings to read back. One plain screen that
 // fits without scrolling: what the app does with your files, then a tick for each document.
 
-// A published privacy policy needs somewhere to write to. Set this to a real address before release.
-private const val CONTACT = "support@example.com"
+// The contact address shown in the privacy policy (and on its web page, built from this file by scripts/build_policy_page.py).
+private const val CONTACT = "bhingesamarth@gmail.com"
 
 private val POINTS = listOf(
   I.cellphoneLock to "Every tool runs on this phone",

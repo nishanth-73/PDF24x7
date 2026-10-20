@@ -119,6 +119,16 @@ app/src/main/java/com/sammyi57/pdftools/
 store-screenshots/          Play Store images (python make_store.py rebuilds them)
 ```
 
+## Privacy policy
+
+The privacy policy and terms are published at **https://sammyzi.github.io/pdf-tools/** (built from the app's own text by
+`scripts/build_policy_page.py`). Contact: [bhingesamarth@gmail.com](mailto:bhingesamarth@gmail.com).
+
+## Credits
+
+Built with Jetpack Compose, Jetpack PDF, CameraX, PdfBox-Android, OpenCV, ML Kit, and the DocAligner page-detection
+model, among others. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for every project and its licence.
+
 ## License
 
 [MIT](LICENSE) © 2026 SammyZi
