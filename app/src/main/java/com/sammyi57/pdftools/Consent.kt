@@ -101,8 +101,15 @@ If these terms change, the app will ask you to accept them again. Continuing to 
 
 private val DOCS = mapOf("privacy" to ("Privacy Policy" to PRIVACY), "terms" to ("Terms & Conditions" to TERMS))
 
+/** First launch: a short tour, then the terms. Reading the terms again from Settings goes straight to them. */
 @Composable
 fun Consent(onAccept: (() -> Unit)? = null, onClose: (() -> Unit)? = null) {
+  var intro by rememberSaveable { mutableStateOf(onAccept != null) }
+  if (intro) Onboarding { intro = false } else ConsentBody(onAccept, onClose)
+}
+
+@Composable
+private fun ConsentBody(onAccept: (() -> Unit)?, onClose: (() -> Unit)?) {
   var doc by remember { mutableStateOf<String?>(null) }
   var privacy by remember { mutableStateOf(false) }
   var terms by remember { mutableStateOf(false) }

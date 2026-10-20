@@ -104,6 +104,7 @@ object I {
   const val lineScan = 0xF0624
   const val magnify = 0xF0349
   const val menuDown = 0xF035D
+  const val messageTextOutline = 0xF036A
   const val openInNew = 0xF03CC
   const val pin = 0xF0403
   const val pinOffOutline = 0xF0930

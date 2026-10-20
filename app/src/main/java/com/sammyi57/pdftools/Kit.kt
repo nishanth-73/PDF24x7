@@ -359,7 +359,8 @@ fun ListRow(
         Column(Modifier.weight(1f)) {
           val color = titleColor ?: if (danger) c.accent else c.ink
           if (marquee) Marquee(title, Type.item, color) else T(title, Type.item, color, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
-          if (!subtitle.isNullOrEmpty()) T(subtitle, Type.small, c.sub, Modifier.padding(top = 1.dp), maxLines = 2)
+          // Room for a full sentence or two: Settings descriptions were being cut off with "…".
+          if (!subtitle.isNullOrEmpty()) T(subtitle, Type.small, c.sub, Modifier.padding(top = 1.dp), maxLines = 5)
         }
         if (value != null) T(value, Type.num, c.sub, Modifier.padding(start = 6.dp))
         trailing()

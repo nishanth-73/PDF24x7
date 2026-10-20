@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
+private const val FEEDBACK_FORM = "https://forms.gle/Fc3RHMTXAiA8fT5VA"
+
 @Composable
 fun SettingsTab() {
   val files = remember(Store.version) { listAllFiles() }
@@ -97,6 +99,10 @@ fun SettingsTab() {
       ListRow("Version", first = true, lead = { Lead(I.informationOutline) }, value = version)
       ListRow("PDF engine", lead = { Lead(I.codeTags) }, value = "PdfBox")
       ListRow("Privacy Policy & Terms", lead = { Lead(I.shieldCheckOutline) }, chevron = true, onClick = { terms = true })
+      ListRow(
+        "Send feedback", lead = { Lead(I.messageTextOutline) }, subtitle = "Tell us what to fix or add. Opens a short form.",
+        onClick = { openUrl(FEEDBACK_FORM) },
+      ) { Icon(I.openInNew, 18.dp, c.faint) }
     }
   }
 
