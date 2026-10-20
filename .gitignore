@@ -16,3 +16,7 @@ local.properties
 *.pem
 *.key
 keystore.properties
+
+# Raw phone screenshots that feed store-screenshots/make_store.py. They show real files and an account name, so they stay
+# on this machine; only the finished images in store-screenshots/play/ are committed.
+/store-screenshots/*.png
