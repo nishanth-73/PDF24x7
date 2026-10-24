@@ -17,7 +17,9 @@ android {
     targetSdk = 36
     versionCode = 2
     versionName = "2.0.0"
-    ndk { abiFilters += "arm64-v8a" } // OpenCV ships a native lib per ABI; one keeps the APK small
+    // OpenCV ships a native lib per ABI; one keeps the APK small. `-PallAbis` (the release workflow) builds an APK per
+    // ABI plus a universal one instead.
+    if (!project.hasProperty("allAbis")) ndk { abiFilters += "arm64-v8a" }
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -47,6 +49,15 @@ android {
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+    }
+  }
+
+  splits {
+    abi {
+      isEnable = project.hasProperty("allAbis")
+      reset()
+      include("arm64-v8a", "armeabi-v7a", "x86_64")
+      isUniversalApk = true
     }
   }
 

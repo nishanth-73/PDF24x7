@@ -95,6 +95,19 @@ PDF_TOOLS_UPLOAD_KEY_PASSWORD=…
 Without it, release builds are signed with the debug key. Google Drive sync needs an Android OAuth client for the
 package name and your signing SHA-1 in Google Cloud.
 
+## Releases
+
+Pushing a tag that matches `versionName` publishes a GitHub release with an APK per ABI (arm64-v8a, armeabi-v7a,
+x86_64) and a universal one, signed with the upload key (`.github/workflows/release.yml`):
+
+```bash
+git tag v2.0.0 && git push origin v2.0.0
+```
+
+The workflow reads the key from the repository secrets `UPLOAD_KEYSTORE_BASE64` (`base64 -w0 upload.jks`),
+`UPLOAD_STORE_PASSWORD`, `UPLOAD_KEY_ALIAS` and `UPLOAD_KEY_PASSWORD`. Build the same APKs locally with
+`./gradlew :app:assembleRelease -PallAbis`.
+
 ## Tests
 
 ```bash
