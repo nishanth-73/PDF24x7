@@ -1,0 +1,41 @@
+# One-off: publishes the APKs in release-apks/ as the v2.0.0 release, tagged on master.
+name: Publish APKs
+
+on:
+  push:
+    branches: [ccr-1682c74e-18f39o]
+    paths: ["release-apks/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v2.0.0 >/dev/null 2>&1; then echo "v2.0.0 already exists"; exit 0; fi
+          gh release create v2.0.0 release-apks/*.apk --target master --latest \
+            --title "PDF Tools v2.0.0" --notes-file - <<'EOF'
+          24 free PDF tools and a document scanner for Android. Everything runs on your phone: no ads, no sign-up, no tracking.
+
+          ### Which APK?
+          - **app-arm64-v8a-release.apk**: most phones (64-bit)
+          - **app-armeabi-v7a-release.apk**: older 32-bit phones
+          - **app-universal-release.apk**: any device (larger download)
+
+          ### Features
+          - Merge, split, organize, rotate and compress PDFs
+          - Scan documents with automatic page-edge detection and on-device OCR
+          - Fill & sign, redact, watermark and add page numbers
+          - Set or remove a password
+          - Built-in PDF viewer with search and text selection
+          - Optional two-way sync with your own Google Drive
+
+          Signing certificate SHA-1: `FF:AD:E0:18:E5:AC:14:37:D9:75:3C:87:B6:D1:08:F0:54:00:B8:BB`
+          EOF
