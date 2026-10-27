@@ -10,6 +10,15 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/sammyZi/pdf-tools/releases/latest"><b>⬇ Download the latest APK</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/sammyZi/pdf-tools/releases">All releases</a>
+  &nbsp;·&nbsp;
+  <a href="https://sammyzi.github.io/pdf-tools/">Privacy policy</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sammyZi/pdf-tools/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sammyZi/pdf-tools?label=release&color=FF5C34"></a>
   <img alt="Platform: Android" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white">
   <img alt="Min SDK 24" src="https://img.shields.io/badge/minSdk-24-351E28">
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white">
@@ -17,6 +26,19 @@
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-FF5C34">
   <img alt="No ads" src="https://img.shields.io/badge/ads-none-D7EFFF">
 </p>
+
+## Download
+
+Grab an APK from the [latest release](https://github.com/sammyZi/pdf-tools/releases/latest):
+
+| File | For |
+|---|---|
+| `app-universal-release.apk` | Any phone. Not sure? Use this one. |
+| `app-arm64-v8a-release.apk` | Most phones from the last several years (64-bit). Smallest download. |
+| `app-armeabi-v7a-release.apk` | Older 32-bit ARM phones. |
+
+Needs Android 7.0 or newer. The built-in PDF viewer needs Android 12 with the latest system updates; on other phones PDFs open in
+your PDF app instead. The APKs are signed with the app's upload key; a copy installed from Google Play is signed with a different key, so remove one before installing the other.
 
 ## Screenshots
 
