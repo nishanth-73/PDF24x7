@@ -15,8 +15,8 @@ android {
     applicationId = "com.sammyi57.pdftools"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "2.0.0"
+    versionCode = 3
+    versionName = "2.1.0"
     // OpenCV ships a native lib per ABI; one keeps the APK small. `-PallAbis` (the release workflow) builds an APK per
     // ABI plus a universal one instead.
     if (!project.hasProperty("allAbis")) ndk { abiFilters += "arm64-v8a" }
