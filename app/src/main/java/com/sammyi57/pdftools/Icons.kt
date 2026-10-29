@@ -107,6 +107,10 @@ object I {
   const val messageTextOutline = 0xF036A
   const val openInNew = 0xF03CC
   const val pin = 0xF0403
+  const val heart = 0xF08D0
+  const val heartOutline = 0xF18A0
+  const val star = 0xF04CE
+  const val paperclip = 0xF03E2
   const val pinOffOutline = 0xF0930
   const val pinOutline = 0xF0931
   const val pencilOutline = 0xF0CB6

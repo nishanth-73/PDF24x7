@@ -26,6 +26,7 @@ its own licence. Thank you to everyone who makes and maintains them.
 ## Fonts and icons
 
 - **Poppins** by Indian Type Foundry, [SIL Open Font License 1.1](https://openfontlicense.org/).
+- **Caveat** by Impallari Type, [SIL Open Font License 1.1](https://openfontlicense.org/).
 - **Material Design Icons** by [Pictogrammers](https://pictogrammers.com/), used under
   [its free licence](https://pictogrammers.com/docs/general/license/).
 

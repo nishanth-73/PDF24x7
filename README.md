@@ -25,6 +25,8 @@
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-FF5C34">
   <img alt="No ads" src="https://img.shields.io/badge/ads-none-D7EFFF">
+  <a href="https://github.com/sammyZi/pdf-tools/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/sammyZi/pdf-tools/total?label=downloads&color=FF5C34"></a>
+  <img alt="Page views" src="https://komarev.com/ghpvc/?username=sammyZi-pdf-tools&label=page%20views&color=351E28&style=flat">
 </p>
 
 ## Download
