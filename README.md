@@ -121,16 +121,13 @@ package name and your signing SHA-1 in Google Cloud.
 
 ## Releases
 
-Pushing a tag that matches `versionName` publishes a GitHub release with an APK per ABI (arm64-v8a, armeabi-v7a,
-x86_64) and a universal one, signed with the upload key (`.github/workflows/release.yml`):
+Releases are built locally with the upload key (an APK per ABI plus a universal one, in `app/build/outputs/apk/release`)
+and attached to a GitHub release with the `gh` CLI. `./gradlew :app:bundleRelease` builds the Play Store bundle.
 
 ```bash
-git tag v2.0.0 && git push origin v2.0.0
+./gradlew :app:assembleRelease -PallAbis
+gh release create v2.1.0 app/build/outputs/apk/release/*.apk --title "PDF Tools v2.1.0"
 ```
-
-The workflow reads the key from the repository secrets `UPLOAD_KEYSTORE_BASE64` (`base64 -w0 upload.jks`),
-`UPLOAD_STORE_PASSWORD`, `UPLOAD_KEY_ALIAS` and `UPLOAD_KEY_PASSWORD`. Build the same APKs locally with
-`./gradlew :app:assembleRelease -PallAbis`.
 
 ## Tests
 
