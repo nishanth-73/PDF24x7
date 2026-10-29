@@ -95,6 +95,11 @@ fun Home() {
         Icon(I.arrowRight, 18.dp, c.sub)
       }
     }
+
+    Stagger(4) {
+      Spacer(Modifier.height(14.dp))
+      com.pandu78.PDF24x7.ads.AdBannerSlot("home_footer")
+    }
   }
 }
 

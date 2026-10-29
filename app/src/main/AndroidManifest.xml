@@ -41,6 +41,13 @@
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
+      <!-- Deep link for Supabase Auth OAuth & password recovery redirects -->
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="com.pandu78.pdf24x7" android:host="auth-callback" />
+      </intent-filter>
     </activity>
 
     <!-- Hands saved files to PDF viewers and the share sheet as content:// uris with read permission. -->

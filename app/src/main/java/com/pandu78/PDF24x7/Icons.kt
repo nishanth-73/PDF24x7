@@ -52,6 +52,7 @@ object I {
   const val cellphoneLock = 0xF094F
   const val cellphoneRemove = 0xF094D
   const val check = 0xF012C
+  const val checkCircle = 0xF05E0
   const val checkboxBlankOutline = 0xF0131
   const val checkboxMarked = 0xF0132
   const val chevronDown = 0xF0140
@@ -74,6 +75,7 @@ object I {
   const val draw = 0xF0F49
   const val drawPen = 0xF19B9
   const val ellipseOutline = 0xF0EA1
+  const val emailOutline = 0xF01EE
   const val eraser = 0xF01FE
   const val eyedropper = 0xF020A
   const val imageOutline = 0xF0976
@@ -98,6 +100,7 @@ object I {
   const val textRecognition = 0xF113A
   const val fullscreen = 0xF0293
   const val gestureTap = 0xF0741
+  const val google = 0xF02AD
   const val googleDrive = 0xF02B6
   const val harddisk = 0xF02CA
   const val history = 0xF02DA
@@ -107,6 +110,7 @@ object I {
   const val imageMultipleOutline = 0xF02EF
   const val informationOutline = 0xF02FD
   const val lineScan = 0xF0624
+  const val lockOutline = 0xF0341
   const val magnify = 0xF0349
   const val menuDown = 0xF035D
   const val messageTextOutline = 0xF036A
@@ -129,6 +133,7 @@ object I {
   const val restore = 0xF099B
   const val rotateLeft = 0xF0465
   const val rotateRight = 0xF0467
+  const val send = 0xF048A
   const val shareVariantOutline = 0xF1514
   const val shieldCheckOutline = 0xF0CC8
   const val swapHorizontal = 0xF04E1

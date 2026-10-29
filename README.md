@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>24 offline PDF tools and a native document scanner for Android.</b><br>
-  Everything runs entirely on your phone. No accounts, no ads, no cloud processing, no tracking.
+  Everything runs locally on your phone by default. Privacy-focused, offline-first document processing with planned cloud sync.
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <img alt="Kotlin 2.2" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white">
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white">
   <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-0572EC">
-  <img alt="Privacy First" src="https://img.shields.io/badge/Privacy-100%25%20On--Device-success">
+  <img alt="Privacy First" src="https://img.shields.io/badge/Privacy-Offline--First-success">
 </p>
 
 ---
@@ -25,7 +25,7 @@
 
 **PDF24x7** (`com.pandu78.PDF24x7`) is a native Android application built with Kotlin and Jetpack Compose. It packages a full suite of PDF editing, organization, optimization, and document scanning capabilities into a single lightweight app designed to run 100% on-device.
 
-The repository also includes static web documentation and a privacy policy in the `docs/` folder, pre-configured for instant deployment to [Vercel](https://vercel.com) or GitHub Pages.
+The repository also includes static web documentation and a privacy policy in the `docs/` folder, pre-configured for instant deployment to [Vercel](https://vercel.com) along with a serverless email feedback function (`/api/feedback`).
 
 ---
 
@@ -47,9 +47,32 @@ The repository also includes static web documentation and a privacy policy in th
 | **Protect & Compress** | Compress (by level or target file size) · OCR (Searchable PDF) · Set Password · Remove Password |
 | **Automate** | Workflow Builder (chain multiple actions across single or batch PDFs) |
 
-- **Custom Navigation**: Modern floating pill navigation bar with instant access to Home, Tools, Files, Profile, and a dedicated Camera scanner action button.
+- **Navigation**: Floating navbar pill housing 4 tabs (Home, Tools, Files, Profile) with quick access to the dedicated round Camera action button.
 - **In-App PDF Viewer**: Built on Android's `androidx.pdf` viewer engine with pinch-to-zoom, search highlights, text selection/copy, page thumbnails, and fast scrolling.
 - **Local Storage & Optional Google Drive**: Secure sandboxed app storage with optional two-way sync to a dedicated `PDF24x7` Google Drive folder (`drive.file` scope only).
+
+---
+
+## Production Readiness Architecture
+
+### 1. Authentication & Supabase Readiness
+- **In-App Auth Flow**: Built directly into the **Profile** tab with Email, Password (with visibility toggle), Sign In, and Create Account modes.
+- **Mandatory Consent**: Account creation strictly enforces an unchecked agreement checkbox for the Terms of Service and Privacy Policy before sign-up can proceed.
+- **Supabase Integration Architecture**: Clean abstraction in `com.pandu78.PDF24x7.auth`:
+  - `AuthManager` & `SupabaseConfig`: REST and OAuth endpoints ready for live connection.
+  - Custom URL scheme `com.pandu78.pdf24x7://auth-callback` configured in `AndroidManifest.xml`.
+  - When unconfigured, displays clear, honest status messages rather than simulating fake authentication.
+
+### 2. In-App Feedback via Resend
+- Replaced third-party form redirects with an in-app **Send Feedback** dialog directly in the Profile tab.
+- Categorized submissions: Bug Report, Feature Request, PDF Processing Issue, and General Feedback.
+- Backed by a secure serverless endpoint at `/api/feedback` using [Resend](https://resend.com) for email dispatch, keeping API keys off client devices.
+- Automatic fallback to native email client (`mailto:`) if the backend service is offline or unconfigured.
+
+### 3. Advertising Readiness
+- Non-intrusive ad placement architecture in `com.pandu78.PDF24x7.ads`:
+  - `AdBannerSlot`: Positioned at the bottom of Home, Tools, and Profile screens away from core buttons and editors.
+  - Ads remain completely disabled (`AdConfig.isEnabled = false`) by default and collapse to zero height until a network provider (e.g., AdMob) is configured.
 
 ---
 
@@ -62,7 +85,8 @@ The repository also includes static web documentation and a privacy policy in th
 | **PDF Viewer** | [Jetpack PDF](https://developer.android.com/jetpack/androidx/releases/pdf) (`androidx.pdf:pdf-compose:1.0.0-alpha18`) |
 | **Camera & Vision** | CameraX (`1.6.0`), OpenCV (`4.12.0`) with bundled DocAligner LC100 ONNX model, ZXing QR scanning |
 | **OCR** | Google ML Kit On-Device Text Recognition |
-| **Blur & Effects** | [Haze](https://github.com/chrisbanes/haze) |
+| **Backend & Auth Readiness** | Supabase Auth GoTrue API (`com.pandu78.PDF24x7.auth`) |
+| **Email Feedback** | Resend Serverless API via Vercel (`api/feedback.js`) |
 | **Build System** | Gradle 8.11 with Kotlin DSL (`build.gradle.kts`) |
 | **Web Docs & Privacy** | Static HTML5/CSS3 in `docs/`, deployed via Vercel (`vercel.json`) |
 
@@ -119,19 +143,37 @@ adb shell am start -n com.pandu78.PDF24x7/.MainActivity
 # Output located at: app/build/outputs/apk/release/app-release.apk
 ```
 
-Release builds use R8 minification and resource shrinking. To configure release signing, copy the template in `gradle.properties.example` into your local `~/.gradle/gradle.properties`:
-```properties
-PDF_TOOLS_UPLOAD_STORE_FILE=/path/to/upload.jks
-PDF_TOOLS_UPLOAD_STORE_PASSWORD=your_keystore_password
-PDF_TOOLS_UPLOAD_KEY_ALIAS=your_key_alias
-PDF_TOOLS_UPLOAD_KEY_PASSWORD=your_key_password
-```
+---
+
+## Future Configuration Checklist
+
+See [.env.example](.env.example) for placeholder values and detailed environment variable definitions.
+
+### 1. Supabase Auth Setup
+1. Create a project at [supabase.com](https://supabase.com).
+2. Under **Project Settings -> API**, copy your **Project URL** and **anon public key**.
+3. Under **Authentication -> URL Configuration**, add the redirect URL:
+   ```
+   com.pandu78.pdf24x7://auth-callback
+   ```
+4. Set `SupabaseConfig.supabaseUrl` and `SupabaseConfig.supabaseAnonKey` in `app/src/main/java/com/pandu78/PDF24x7/auth/SupabaseConfig.kt` (or supply via build config).
+
+### 2. Resend Feedback Setup
+1. Create an API key at [resend.com](https://resend.com) and verify your sending domain.
+2. In your Vercel Project Settings, add:
+   - `RESEND_API_KEY`: Your Resend API key.
+   - `FEEDBACK_TO_EMAIL`: Destination support inbox.
+   - `FEEDBACK_FROM_EMAIL`: Verified sender address.
+
+### 3. Google AdMob Setup (When Ready)
+1. Register app in Google AdMob and obtain App ID and Unit IDs.
+2. Enable `AdConfig.isEnabled = true` and specify IDs in `AdConfig.kt`.
 
 ---
 
 ## Vercel Deployment
 
-The `docs/` directory contains the web landing page, terms of service, and privacy policy. The repository is pre-configured with `vercel.json` for zero-configuration static deployment:
+The repository includes both static documentation (`docs/`) and serverless functions (`api/feedback.js`):
 
 1. **Deploy with Vercel CLI**:
    ```bash
@@ -140,22 +182,16 @@ The `docs/` directory contains the web landing page, terms of service, and priva
    ```
 2. **Deploy via GitHub Integration**:
    - Import `https://github.com/nishanth-73/PDF24x7` into your [Vercel Dashboard](https://vercel.com/new).
-   - Vercel automatically reads [`vercel.json`](vercel.json), pointing `outputDirectory` to `docs` with clean URLs. No custom build commands or environment variables are required.
+   - Vercel automatically deploys static documentation from `docs/` and registers `/api/feedback`.
 
 ---
 
 ## Security & Privacy
 
-- **Zero Telemetry**: No analytics libraries, crash report beacons, or user tracking SDKs.
 - **Offline Processing**: All document parsing, rendering, OCR, and editing run strictly within local memory and sandboxed app storage.
-- **Safe Cloud Sync**: Google Drive integration is opt-in and uses the restricted `drive.file` scope, granting the app access only to the files and folders it creates.
+- **Safe Cloud Sync**: Google Drive integration is opt-in and uses the restricted `drive.file` scope.
+- **Zero Third-Party Trackers**: No hidden analytics SDKs or advertising beacons are active.
 - For vulnerability disclosures, please review [SECURITY.md](SECURITY.md).
-
----
-
-## Contributing
-
-Contributions, bug reports, and suggestions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for code conventions, testing standards, and pull request workflows.
 
 ---
 

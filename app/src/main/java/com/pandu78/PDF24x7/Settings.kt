@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,9 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.pandu78.PDF24x7.ads.AdBannerSlot
+import com.pandu78.PDF24x7.auth.AccountSection
+import com.pandu78.PDF24x7.feedback.FeedbackDialog
 import kotlinx.coroutines.launch
-
-private const val FEEDBACK_FORM = "https://forms.gle/Fc3RHMTXAiA8fT5VA"
 
 @Composable
 fun SettingsTab() = ProfileTab()
@@ -41,6 +43,9 @@ fun ProfileTab() {
   var driveConfirm by remember { mutableStateOf(false) }
   var wiping by remember { mutableStateOf(false) }
   var terms by remember { mutableStateOf(false) }
+  var feedbackOpen by remember { mutableStateOf(false) }
+  var docToView by remember { mutableStateOf<String?>(null) }
+
   val scope = rememberCoroutineScope()
   // Drive goes first: if it fails, the phone keeps its files and the error shows under Google Drive.
   val wipeBoth = {
@@ -61,7 +66,11 @@ fun ProfileTab() {
   Screen {
     LargeTitle("Profile")
 
-    GroupLabel("Appearance", first = true)
+    // Account & Authentication Section
+    GroupLabel("Account", first = true)
+    AccountSection(onOpenDoc = { docToView = it })
+
+    GroupLabel("Appearance")
     ThemePicker()
 
     GroupLabel("Storage")
@@ -93,7 +102,7 @@ fun ProfileTab() {
       } else {
         ListRow("Files stay on this phone", first = true, lead = { Lead(I.cellphoneLock) }, subtitle = "Every tool runs on the device. PDFs leave it only if you turn on Google Drive sync.")
       }
-      ListRow("No account needed, no tracking", lead = { Lead(I.accountOffOutline) }, subtitle = "No sign-up, no analytics, no ads.")
+      ListRow("Local & private by default", lead = { Lead(I.shieldCheckOutline) }, subtitle = "Documents are processed on your phone. Cloud sync and accounts are opt-in.")
       ListRow("Works offline", lead = { Lead(I.airplane) }, subtitle = "Every tool works in airplane mode. Syncing waits until you're online.")
     }
 
@@ -103,9 +112,22 @@ fun ProfileTab() {
       ListRow("PDF engine", lead = { Lead(I.codeTags) }, value = "PdfBox")
       ListRow("Privacy Policy & Terms", lead = { Lead(I.shieldCheckOutline) }, chevron = true, onClick = { terms = true })
       ListRow(
-        "Send feedback", lead = { Lead(I.messageTextOutline) }, subtitle = "Tell us what to fix or add. Opens a short form.",
-        onClick = { openUrl(FEEDBACK_FORM) },
-      ) { Icon(I.openInNew, 18.dp, c.faint) }
+        "Send feedback", lead = { Lead(I.messageTextOutline) }, subtitle = "Report issues or suggest features directly in-app.",
+        onClick = { feedbackOpen = true },
+      ) { Icon(I.chevronRight, 18.dp, c.faint) }
+    }
+
+    Spacer(Modifier.height(12.dp))
+    AdBannerSlot("profile_footer")
+  }
+
+  if (feedbackOpen) {
+    FeedbackDialog(version = version, onDismiss = { feedbackOpen = false })
+  }
+
+  if (docToView != null) {
+    FullSheet({ docToView = null }) {
+      DocViewerSheet(docToView ?: "privacy") { docToView = null }
     }
   }
 

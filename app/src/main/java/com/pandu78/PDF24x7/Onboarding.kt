@@ -127,7 +127,7 @@ private fun OnboardingBody(themeDark: Boolean, onDone: () -> Unit) {
     onDone()
   }
   val label = listOf("Get started", "Continue", "That's my look")[page]
-  val line = listOf("No account needed. Everything stays on this phone.", "Pin as many as you like. Change these anytime.", "A good fit can change. Switch anytime in Settings.")[page]
+  val line = listOf("Offline-first tools. Everything stays on this phone.", "Pin as many as you like. Change these anytime.", "A good fit can change. Switch anytime in Settings.")[page]
 
   Column(Modifier.fillMaxSize().background(BrandTokens.Light.background).statusBarsPadding().navigationBarsPadding()) {
     Box(Modifier.weight(1f).fillMaxWidth()) {
