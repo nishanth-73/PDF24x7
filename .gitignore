@@ -23,3 +23,7 @@ keystore.properties
 
 # Built APKs go in GitHub releases, not the repo
 /release-apks/
+
+# Local helper scripts (Play assets, policy page) stay on this machine
+/scripts/
+/store-screenshots/*.py

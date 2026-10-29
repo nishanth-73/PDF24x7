@@ -150,13 +150,12 @@ app/src/main/java/com/sammyi57/pdftools/
   Scanner.kt, Review.kt, ScanModel.kt, DocCamera.kt, DocVision.kt
   Viewer.kt                 in-app viewer
   Storage.kt, Files.kt, Backup.kt
-store-screenshots/          Play Store images (python make_store.py rebuilds them)
+store-screenshots/          Play Store images
 ```
 
 ## Privacy policy
 
-The privacy policy and terms are published at **https://sammyzi.github.io/pdf-tools/** (built from the app's own text by
-`scripts/build_policy_page.py`). Contact: [bhingesamarth@gmail.com](mailto:bhingesamarth@gmail.com).
+The privacy policy and terms are published at **https://sammyzi.github.io/pdf-tools/** (built from the app's own text). Contact: [bhingesamarth@gmail.com](mailto:bhingesamarth@gmail.com).
 
 ## Credits
 
