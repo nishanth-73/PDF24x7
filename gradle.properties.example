@@ -1,0 +1,9 @@
+# Example release signing configuration.
+# Copy these lines into ~/.gradle/gradle.properties (NOT in this repository)
+# when generating signed release APKs or bundles:
+#
+# PDF_TOOLS_UPLOAD_STORE_FILE=/path/to/upload.jks
+# PDF_TOOLS_UPLOAD_STORE_PASSWORD=your_keystore_password
+# PDF_TOOLS_UPLOAD_KEY_ALIAS=your_key_alias
+# PDF_TOOLS_UPLOAD_KEY_PASSWORD=your_key_password
+

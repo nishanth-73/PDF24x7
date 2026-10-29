@@ -1,167 +1,165 @@
-<p align="center">
-  <img src="store-screenshots/play/feature-graphic.png" alt="PDF Tools: every PDF tool, one free app" width="100%">
-</p>
-
-<h1 align="center">PDF Tools</h1>
+# PDF24x7
 
 <p align="center">
-  24 free PDF tools and a document scanner for Android.<br>
-  Everything runs on your phone. No ads, no sign-up, no tracking.
+  <img src="assets/branding/pdf24x7_logo.svg" alt="PDF24x7 Logo" width="280">
 </p>
 
 <p align="center">
-  <a href="https://github.com/sammyZi/pdf-tools/releases/latest"><b>⬇ Download the latest APK</b></a>
-  &nbsp;·&nbsp;
-  <a href="https://github.com/sammyZi/pdf-tools/releases">All releases</a>
-  &nbsp;·&nbsp;
-  <a href="https://sammyzi.github.io/pdf-tools/">Privacy policy</a>
+  <b>24 offline PDF tools and a native document scanner for Android.</b><br>
+  Everything runs entirely on your phone. No accounts, no ads, no cloud processing, no tracking.
 </p>
 
 <p align="center">
-  <a href="https://github.com/sammyZi/pdf-tools/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sammyZi/pdf-tools?label=release&color=FF5C34"></a>
-  <img alt="Platform: Android" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white">
-  <img alt="Min SDK 24" src="https://img.shields.io/badge/minSdk-24-351E28">
-  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white">
+  <img alt="Platform: Android" src="https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white">
+  <img alt="Min SDK: 24" src="https://img.shields.io/badge/minSdk-24-351E28">
+  <img alt="Target SDK: 36" src="https://img.shields.io/badge/targetSdk-36-0572EC">
+  <img alt="Kotlin 2.2" src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white">
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white">
-  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-FF5C34">
-  <img alt="No ads" src="https://img.shields.io/badge/ads-none-D7EFFF">
-  <a href="https://github.com/sammyZi/pdf-tools/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/sammyZi/pdf-tools/total?label=downloads&color=FF5C34"></a>
-  <img alt="Page views" src="https://komarev.com/ghpvc/?username=sammyZi-pdf-tools&label=page%20views&color=351E28&style=flat">
+  <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-0572EC">
+  <img alt="Privacy First" src="https://img.shields.io/badge/Privacy-100%25%20On--Device-success">
 </p>
 
-## Download
+---
 
-Grab an APK from the [latest release](https://github.com/sammyZi/pdf-tools/releases/latest):
+## Overview
 
-| File | For |
-|---|---|
-| `app-universal-release.apk` | Any phone. Not sure? Use this one. |
-| `app-arm64-v8a-release.apk` | Most phones from the last several years (64-bit). Smallest download. |
-| `app-armeabi-v7a-release.apk` | Older 32-bit ARM phones. |
+**PDF24x7** (`com.pandu78.PDF24x7`) is a native Android application built with Kotlin and Jetpack Compose. It packages a full suite of PDF editing, organization, optimization, and document scanning capabilities into a single lightweight app designed to run 100% on-device.
 
-Needs Android 7.0 or newer. The built-in PDF viewer needs Android 12 with the latest system updates; on other phones PDFs open in
-your PDF app instead. The APKs are signed with the app's upload key; a copy installed from Google Play is signed with a different key, so remove one before installing the other.
+The repository also includes static web documentation and a privacy policy in the `docs/` folder, pre-configured for instant deployment to [Vercel](https://vercel.com) or GitHub Pages.
 
-## Screenshots
-
-| | | |
-|:-:|:-:|:-:|
-| <img src="store-screenshots/play/01-home.png" width="250" alt="Home with every tool"> | <img src="store-screenshots/play/02-scanner.png" width="250" alt="Document scanner"> | <img src="store-screenshots/play/03-tool-merge.png" width="250" alt="Merge PDFs"> |
-| <img src="store-screenshots/play/04-viewer.png" width="250" alt="In-app PDF viewer"> | <img src="store-screenshots/play/05-files-phone.png" width="250" alt="Files synced to Google Drive"> | <img src="store-screenshots/play/06-settings.png" width="250" alt="Settings"> |
+---
 
 ## Features
 
-### Scan
-- Camera scanner with live page-edge detection, auto or manual capture, flash, and front or back camera.
-- Modes for documents, books (two pages per shot), ID cards (front and back on one page), business cards and whiteboards.
-- Crop, rotate, filters (auto colour, light text, grayscale, whiteboard), brightness and contrast.
-- Cleanup and markup brushes with any colour, including one picked straight off the page.
-- Saved scans are searchable: on-device OCR adds an invisible text layer you can search and copy.
+### 📷 Document Scanner
+- Camera scanner with live page-edge detection, automatic or manual capture, flash support, and front/back camera selection.
+- Modes for documents, books (two pages per shot), ID cards (front and back merged onto a single page), business cards, and whiteboards.
+- Perspective correction, crop, rotate, and document filters (Auto Colour, Light Text, Grayscale, Whiteboard, Brightness & Contrast).
+- Cleanup and markup brush tools with color picking straight off the page.
+- On-device searchable OCR: automatically adds an invisible text layer to scans.
 
-### 24 tools
-| Group | Tools |
+### 🛠️ 24 PDF Tools
+| Category | Included Tools |
 |---|---|
-| Combine & split | Merge · Alternate & Mix · Split · Split by Text · Split by Bookmarks · Split in Half · Split by Size · PDF to ZIP |
-| Arrange pages | Organize (reorder, rotate, delete) · Rotate · Flip · Multiple Pages per Sheet · Crop & Resize |
-| Fill & mark up | Fill & Sign (with a drawn, saved signature) · Watermark · Page Numbers · Redact · Edit PDF Details |
-| Protect & shrink | Compress (by level, or to fit a size) · OCR · Set Password · Remove Password |
-| Automate | Workflow Builder: chain any tools and run them on one or many PDFs |
+| **Combine & Split** | Merge · Alternate & Mix · Split · Split by Text · Split by Bookmarks · Split in Half · Split by Size · PDF to ZIP |
+| **Arrange Pages** | Organize (reorder, rotate, delete) · Rotate · Flip · Multiple Pages per Sheet · Crop & Resize |
+| **Fill & Mark Up** | Fill & Sign (drawn and saved signatures) · Watermark · Page Numbers · Redact · Edit PDF Metadata |
+| **Protect & Compress** | Compress (by level or target file size) · OCR (Searchable PDF) · Set Password · Remove Password |
+| **Automate** | Workflow Builder (chain multiple actions across single or batch PDFs) |
 
-Pin the tools you use most to the top of Home. Every tool can preview its result before saving.
+- **Custom Navigation**: Modern floating pill navigation bar with instant access to Home, Tools, Files, Profile, and a dedicated Camera scanner action button.
+- **In-App PDF Viewer**: Built on Android's `androidx.pdf` viewer engine with pinch-to-zoom, search highlights, text selection/copy, page thumbnails, and fast scrolling.
+- **Local Storage & Optional Google Drive**: Secure sandboxed app storage with optional two-way sync to a dedicated `PDF24x7` Google Drive folder (`drive.file` scope only).
 
-### Read
-- Built-in viewer: smooth scrolling and zoom, select and copy text, search with highlights, links, page thumbnails,
-  jump to page and a fast scroller. Password-protected PDFs open with their password.
+---
 
-### Files and Google Drive
-- Folders, search, rename, move, share, and save a copy to any folder or as Word or JPEG.
-- Optional two-way sync with a "PDF Tools" folder in your own Google Drive (`drive.file` scope: the app only sees
-  what it created). Download, rename and delete Drive folders from the app.
+## Tech Stack
 
-### Design
-- Light and dark themes in Tangerine, Black Cherry and Cool Blue, with grainy-gradient surfaces and a frosted tab bar.
-
-## Privacy
-
-Every tool, the scanner and OCR run on the device. Files leave the phone only if you turn on Google Drive sync, and
-then only to your own Drive. There are no ads, no analytics and no account.
-
-## Tech stack
-
-| | |
+| Component | Technology |
 |---|---|
-| Language and UI | Kotlin, Jetpack Compose, Material 3, Navigation Compose |
-| PDF engine | [PdfBox-Android](https://github.com/TomRoush/PdfBox-Android), Android `PdfRenderer` |
-| Viewer | [Jetpack PDF](https://developer.android.com/jetpack/androidx/releases/pdf) (`androidx.pdf`) |
-| Scanner | CameraX, OpenCV with a bundled DocAligner model, ZXing (QR codes) |
-| OCR | ML Kit Text Recognition (on-device) |
-| Sync | Google Identity authorization, Drive REST API v3 |
-| Blur | [Haze](https://github.com/chrisbanes/haze) |
+| **Language & Framework** | Kotlin 2.2, Jetpack Compose (BOM `2026.06.01`), Material 3, Navigation Compose |
+| **PDF Processing Engine** | [PdfBox-Android](https://github.com/TomRoush/PdfBox-Android) (`com.tom-roush:pdfbox-android:2.0.27.0`) |
+| **PDF Viewer** | [Jetpack PDF](https://developer.android.com/jetpack/androidx/releases/pdf) (`androidx.pdf:pdf-compose:1.0.0-alpha18`) |
+| **Camera & Vision** | CameraX (`1.6.0`), OpenCV (`4.12.0`) with bundled DocAligner LC100 ONNX model, ZXing QR scanning |
+| **OCR** | Google ML Kit On-Device Text Recognition |
+| **Blur & Effects** | [Haze](https://github.com/chrisbanes/haze) |
+| **Build System** | Gradle 8.11 with Kotlin DSL (`build.gradle.kts`) |
+| **Web Docs & Privacy** | Static HTML5/CSS3 in `docs/`, deployed via Vercel (`vercel.json`) |
 
-## Build
+---
 
-Requirements: JDK 17 and the Android SDK (compile SDK 36 with SDK extension 19). Android Studio works too.
+## Prerequisites
 
+- **Java Development Kit (JDK)**: JDK 17 or higher (tested with Eclipse Adoptium OpenJDK 21).
+- **Android SDK**: Compile SDK `36` with SDK extension `19` (required by Jetpack PDF 1.0.0-alpha18).
+- **Operating System**: Windows, macOS, or Linux.
+
+---
+
+## Building and Running
+
+Clone the repository:
 ```bash
-./gradlew :app:assembleDebug        # debug APK in app/build/outputs/apk/debug
-./gradlew :app:installRelease       # release build on a connected phone
+git clone https://github.com/nishanth-73/PDF24x7.git
+cd PDF24x7
 ```
 
-Release signing reads your upload key from `~/.gradle/gradle.properties` (never the repo):
+### 1. Compile Kotlin Sources
+```bash
+# Windows
+.\gradlew.bat :app:compileReleaseKotlin
 
+# Linux / macOS
+./gradlew :app:compileReleaseKotlin
+```
+
+### 2. Run JVM Unit Tests
+```bash
+.\gradlew.bat :app:testReleaseUnitTest
+```
+
+### 3. Build Debug APK
+```bash
+.\gradlew.bat :app:assembleDebug
+# Output located at: app/build/outputs/apk/debug/app-debug.apk
+```
+
+### 4. Install onto Connected Device via ADB
+```bash
+# Debug install
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Launch app
+adb shell am start -n com.pandu78.PDF24x7/.MainActivity
+```
+
+### 5. Build Minified Release APK
+```bash
+.\gradlew.bat :app:assembleRelease
+# Output located at: app/build/outputs/apk/release/app-release.apk
+```
+
+Release builds use R8 minification and resource shrinking. To configure release signing, copy the template in `gradle.properties.example` into your local `~/.gradle/gradle.properties`:
 ```properties
 PDF_TOOLS_UPLOAD_STORE_FILE=/path/to/upload.jks
-PDF_TOOLS_UPLOAD_STORE_PASSWORD=…
-PDF_TOOLS_UPLOAD_KEY_ALIAS=…
-PDF_TOOLS_UPLOAD_KEY_PASSWORD=…
+PDF_TOOLS_UPLOAD_STORE_PASSWORD=your_keystore_password
+PDF_TOOLS_UPLOAD_KEY_ALIAS=your_key_alias
+PDF_TOOLS_UPLOAD_KEY_PASSWORD=your_key_password
 ```
 
-Without it, release builds are signed with the debug key. Google Drive sync needs an Android OAuth client for the
-package name and your signing SHA-1 in Google Cloud.
+---
 
-## Releases
+## Vercel Deployment
 
-Releases are built locally with the upload key (an APK per ABI plus a universal one, in `app/build/outputs/apk/release`)
-and attached to a GitHub release with the `gh` CLI. `./gradlew :app:bundleRelease` builds the Play Store bundle.
+The `docs/` directory contains the web landing page, terms of service, and privacy policy. The repository is pre-configured with `vercel.json` for zero-configuration static deployment:
 
-```bash
-./gradlew :app:assembleRelease -PallAbis
-gh release create v2.1.0 app/build/outputs/apk/release/*.apk --title "PDF Tools v2.1.0"
-```
+1. **Deploy with Vercel CLI**:
+   ```bash
+   npm i -g vercel
+   vercel
+   ```
+2. **Deploy via GitHub Integration**:
+   - Import `https://github.com/nishanth-73/PDF24x7` into your [Vercel Dashboard](https://vercel.com/new).
+   - Vercel automatically reads [`vercel.json`](vercel.json), pointing `outputDirectory` to `docs` with clean URLs. No custom build commands or environment variables are required.
 
-## Tests
+---
 
-```bash
-./gradlew :app:testReleaseUnitTest                          # page geometry (JVM)
-./gradlew :app:connectedDebugAndroidTest -PsideBySide       # every tool, the viewer and pins, on a phone
-```
+## Security & Privacy
 
-`-PsideBySide` installs the test build as a separate app (`com.pandu78.PDF24x7.test`), so a run never touches
-your real files.
+- **Zero Telemetry**: No analytics libraries, crash report beacons, or user tracking SDKs.
+- **Offline Processing**: All document parsing, rendering, OCR, and editing run strictly within local memory and sandboxed app storage.
+- **Safe Cloud Sync**: Google Drive integration is opt-in and uses the restricted `drive.file` scope, granting the app access only to the files and folders it creates.
+- For vulnerability disclosures, please review [SECURITY.md](SECURITY.md).
 
-## Project layout
+---
 
-```
-app/src/main/java/com/pandu78/PDF24x7/
-  Theme.kt, Kit.kt          palette, type and shared components
-  Tools.kt                  the tool catalogue
-  Pdf.kt, PdfRender.kt      PDF engine
-  ToolScreen.kt, PageEditors.kt
-  Scanner.kt, Review.kt, ScanModel.kt, DocCamera.kt, DocVision.kt
-  Viewer.kt                 in-app viewer
-  Storage.kt, Files.kt, Backup.kt
-store-screenshots/          Play Store images
-```
+## Contributing
 
-## Privacy policy
+Contributions, bug reports, and suggestions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for code conventions, testing standards, and pull request workflows.
 
-The privacy policy and terms are published at **https://sammyzi.github.io/pdf-tools/** (built from the app's own text). Contact: [bhingesamarth@gmail.com](mailto:bhingesamarth@gmail.com).
-
-## Credits
-
-Built with Jetpack Compose, Jetpack PDF, CameraX, PdfBox-Android, OpenCV, ML Kit, and the DocAligner page-detection
-model, among others. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for every project and its licence.
+---
 
 ## License
 
-[MIT](LICENSE) © 2026 SammyZi
+This project is licensed under the [MIT License](LICENSE).
+Third-party libraries, fonts, and model assets are used under their respective open-source licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for complete details.

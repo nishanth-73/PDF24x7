@@ -1,6 +1,6 @@
 # Third-party notices
 
-PDF Tools is MIT-licensed ([LICENSE](LICENSE)). It is built on the open-source projects and assets below, each used under
+PDF24x7 is MIT-licensed ([LICENSE](LICENSE)). It is built on the open-source projects and assets below, each used under
 its own licence. Thank you to everyone who makes and maintains them.
 
 ## Libraries

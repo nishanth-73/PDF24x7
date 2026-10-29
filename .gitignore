@@ -3,12 +3,19 @@
 .kotlin/
 build/
 app/build/
+*.apk
+*.aab
+*.dex
 
 # Local machine settings (SDK path) and IDE files
 local.properties
 *.iml
 .idea/
+.vscode/
 .DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
 
 # Signing keys and secrets (the upload key lives in ~/.gradle/gradle.properties, never here)
 *.jks
@@ -17,13 +24,27 @@ local.properties
 *.key
 keystore.properties
 
-# Raw phone screenshots that feed store-screenshots/make_store.py. They show real files and an account name, so they stay
-# on this machine; only the finished images in store-screenshots/play/ are committed.
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Temporary artifacts and scratch files
+lockup_*.png
+*.log
+
+# Vercel deployment cache
+.vercel/
+
+# Raw phone screenshots that feed store-screenshots/make_store.py.
 /store-screenshots/*.png
 
 # Built APKs go in GitHub releases, not the repo
 /release-apks/
 
-# Local helper scripts (Play assets, policy page) stay on this machine
+# Local helper scripts
 /scripts/
 /store-screenshots/*.py
