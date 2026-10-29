@@ -136,13 +136,13 @@ gh release create v2.1.0 app/build/outputs/apk/release/*.apk --title "PDF Tools 
 ./gradlew :app:connectedDebugAndroidTest -PsideBySide       # every tool, the viewer and pins, on a phone
 ```
 
-`-PsideBySide` installs the test build as a separate app (`com.sammyi57.pdftools.test`), so a run never touches
+`-PsideBySide` installs the test build as a separate app (`com.pandu78.PDF24x7.test`), so a run never touches
 your real files.
 
 ## Project layout
 
 ```
-app/src/main/java/com/sammyi57/pdftools/
+app/src/main/java/com/pandu78/PDF24x7/
   Theme.kt, Kit.kt          palette, type and shared components
   Tools.kt                  the tool catalogue
   Pdf.kt, PdfRender.kt      PDF engine

@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">PDF Tools</string>
-  <color name="window">#F6F2EE</color>
+  <color name="window">#F5F6F8</color>
   <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
     <item name="android:windowBackground">@color/window</item>
     <item name="android:statusBarColor">@android:color/transparent</item>

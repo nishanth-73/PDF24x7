@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Themed icon (Android 13+): the same page and viewfinder, with the fold and lines cut out so it reads in one colour. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M31,40V31H40 M68,31H77V40 M31,68V77H40 M68,77H77V68"
-        android:strokeColor="#FFFFFFFF" android:strokeWidth="3.5" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:fillType="evenOdd" android:fillColor="#FFFFFFFF"
-        android:pathData="M43.5,35H59L67,43V70.5Q67,73 64.5,73H43.5Q41,73 41,70.5V37.5Q41,35 43.5,35Z
-            M46.75,48H53.25A1.75,1.75 0,0 1,53.25 51.5H46.75A1.75,1.75 0,0 1,46.75 48Z
-            M46,55H62A1,1 0,0 1,62 57H46A1,1 0,0 1,46 55Z M46,59.5H60A1,1 0,0 1,60 61.5H46A1,1 0,0 1,46 59.5Z M46,64H56A1,1 0,0 1,56 66H46A1,1 0,0 1,46 64Z" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.087291"
+        android:scaleY="0.087291"
+        android:translateX="-1.299"
+        android:translateY="2.062">
+        <path android:fillColor="#FFFFFF" android:pathData="M262.323639,707.134949c14.177246,52.631775,39.162414,99.622375,74.565124,140.949157c37.304749,43.547242,82.477417,76.830994,134.553193,100.716126c68.348266,31.348816,139.925354,41.961243,214.463195,32.694458c54.193787-6.737549,104.268311-25.269775,150.97284-53.312012c49.462341-29.69812,90.860656-67.910095,122.688171-116.197815c36.080628-54.740478,55.521729-115.107422,60.227783-180.30426c2.557862-35.436035-.35968-70.635498-7.104675-105.420898-17.918396-92.410065-60.960754-170.510071-133.850647-231.056458-49.800049-41.366714-106.539062-68.477554-170.259521-80.629776-46.198121-8.810501-92.413758-8.512039-138.692383-.444046-57.368408,10.001358-110.014893,31.409317-157.679108,64.886993-52.614349,36.954499-92.934967,84.522644-121.754852,141.901551-25.481476,50.7323-38.770889,104.628357-41.595444,161.225525-2.101242,42.10382,2.494736,83.479004,13.466324,124.991455Z"/>
+    </group>
 </vector>

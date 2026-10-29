@@ -14,5 +14,5 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "PDF Tools"
+rootProject.name = "PDF24x7"
 include(":app")

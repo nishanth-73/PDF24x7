@@ -6,13 +6,13 @@ plugins {
 }
 
 android {
-  namespace = "com.sammyi57.pdftools"
+  namespace = "com.pandu78.PDF24x7"
   compileSdk = 36
   compileSdkExtension = 19 // Jetpack PDF 1.0.0-alpha18 builds against the PDF APIs added in SDK extension 19
 
   defaultConfig {
     // Same id and storage layout as the Expo app, so this build installs over it and keeps its files, scans and Drive link.
-    applicationId = "com.sammyi57.pdftools"
+    applicationId = "com.pandu78.PDF24x7"
     minSdk = 24
     targetSdk = 36
     versionCode = 3
