@@ -44,10 +44,11 @@ object SupabaseConfig {
   var googleClientId: String = BuildConfig.GOOGLE_CLIENT_ID
 
   /**
-   * Custom scheme redirect URI registered in AndroidManifest.xml:
-   * com.pandu78.pdf24x7://auth-callback
+   * Dedicated custom scheme redirect URI registered in AndroidManifest.xml:
+   * com.pandu78.pdf24x7://login-callback
    */
-  const val REDIRECT_URL = "com.pandu78.pdf24x7://auth-callback"
+  const val REDIRECT_URL = "com.pandu78.pdf24x7://login-callback"
+  const val LEGACY_REDIRECT_URL = "com.pandu78.pdf24x7://auth-callback"
 
   /**
    * Returns true only when valid non-placeholder Supabase credentials have been provided.
@@ -79,6 +80,9 @@ object SupabaseConfig {
   val tokenIdTokenEndpoint: String
     get() = "$baseAuthUrl/token?grant_type=id_token"
 
+  val tokenPkceEndpoint: String
+    get() = "$baseAuthUrl/token?grant_type=pkce"
+
   val tokenRefreshEndpoint: String
     get() = "$baseAuthUrl/token?grant_type=refresh_token"
 
@@ -95,8 +99,22 @@ object SupabaseConfig {
     get() = "$baseAuthUrl/logout"
 
   /**
-   * URL for browser-based OAuth authorization flow when native Google sign-in is not used.
+   * Builds the Supabase OAuth authorization URL for Google, supporting optional PKCE code_challenge.
+   */
+  fun buildGoogleOAuthAuthorizeUrl(codeChallenge: String? = null): String {
+    val builder = Uri.parse("$baseAuthUrl/authorize").buildUpon()
+      .appendQueryParameter("provider", "google")
+      .appendQueryParameter("redirect_to", REDIRECT_URL)
+    if (!codeChallenge.isNullOrBlank()) {
+      builder.appendQueryParameter("code_challenge", codeChallenge)
+      builder.appendQueryParameter("code_challenge_method", "s256")
+    }
+    return builder.build().toString()
+  }
+
+  /**
+   * Default URL for browser-based OAuth authorization flow when native Google sign-in is not used.
    */
   val googleOAuthAuthorizeUrl: String
-    get() = "$baseAuthUrl/authorize?provider=google&redirect_to=${Uri.encode(REDIRECT_URL)}"
+    get() = buildGoogleOAuthAuthorizeUrl()
 }

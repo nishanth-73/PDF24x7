@@ -166,6 +166,8 @@ fun AuthModalDialog(
   var showForgotDialog by remember { mutableStateOf(false) }
 
   val scope = rememberCoroutineScope()
+  val context = androidx.compose.ui.platform.LocalContext.current
+  val activity = context as? android.app.Activity
 
   AppDialog(
     onDismiss = onDismiss,
@@ -366,9 +368,14 @@ fun AuthModalDialog(
         icon = I.google,
         kind = BtnKind.Secondary,
         onClick = {
-          AuthManager.signInWithGoogle { result ->
-            if (result is AuthResult.Error) {
-              errorMessage = result.message
+          AuthManager.signInWithGoogle(activity, scope) { result ->
+            when (result) {
+              is AuthResult.Success -> onDismiss()
+              is AuthResult.Error -> {
+                if (result.message != "Sign-in cancelled.") {
+                  errorMessage = result.message
+                }
+              }
             }
           }
         },
@@ -394,6 +401,8 @@ fun ForgotPasswordDialog(
   var statusMessage by remember { mutableStateOf<String?>(null) }
   var isError by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
+  val context = androidx.compose.ui.platform.LocalContext.current
+  val activity = context as? android.app.Activity
 
   AppDialog(
     onDismiss = onDismiss,

@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.pandu78.PDF24x7.auth.AuthManager
 import com.pandu78.PDF24x7.auth.AuthResult
+import com.pandu78.PDF24x7.auth.AuthState
 import com.pandu78.PDF24x7.auth.ForgotPasswordDialog
 
 private const val CONTACT = "medurinishanth78@gmail.com"
@@ -267,12 +268,38 @@ fun WelcomeAuthScreen(onAccept: (() -> Unit)?) {
   var privacyAccepted by rememberSaveable { mutableStateOf(false) }
   var termsAccepted by rememberSaveable { mutableStateOf(false) }
 
+  val authState by AuthManager.state
   var busy by remember { mutableStateOf(false) }
   var googleBusy by remember { mutableStateOf(false) }
   var errorMessage by remember { mutableStateOf<String?>(null) }
   var successMessage by remember { mutableStateOf<String?>(null) }
   var showForgotPassword by remember { mutableStateOf(false) }
   var doc by remember { mutableStateOf<String?>(null) }
+
+  LaunchedEffect(authState) {
+    when (val state = authState) {
+      is AuthState.Authenticated -> {
+        Terms.accept()
+        onAccept?.invoke()
+      }
+      is AuthState.Error -> {
+        googleBusy = false
+        busy = false
+        if (state.message != "Sign-in cancelled.") {
+          errorMessage = state.message
+        }
+      }
+      is AuthState.Unauthenticated -> {
+        googleBusy = false
+        busy = false
+      }
+      is AuthState.Loading -> {
+        if (state.message.contains("Google", ignoreCase = true)) {
+          googleBusy = true
+        }
+      }
+    }
+  }
 
   val scrollState = rememberScrollState()
 
@@ -347,7 +374,9 @@ fun WelcomeAuthScreen(onAccept: (() -> Unit)?) {
                 onAccept?.invoke()
               }
               is AuthResult.Error -> {
-                errorMessage = result.message
+                if (result.message != "Sign-in cancelled.") {
+                  errorMessage = result.message
+                }
               }
             }
           }

@@ -46,7 +46,10 @@
         <action android:name="android.intent.action.VIEW" />
         <category android:name="android.intent.category.DEFAULT" />
         <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="com.pandu78.pdf24x7" android:host="login-callback" />
         <data android:scheme="com.pandu78.pdf24x7" android:host="auth-callback" />
+        <data android:scheme="com.pdf24x7.app" android:host="login-callback" />
+        <data android:scheme="com.pdf24x7.app" android:host="auth-callback" />
       </intent-filter>
     </activity>
 

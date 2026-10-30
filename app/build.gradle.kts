@@ -115,6 +115,7 @@ dependencies {
   implementation("androidx.activity:activity-compose:1.11.0")
   implementation("androidx.navigation:navigation-compose:2.9.4")
   implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
+  implementation("androidx.browser:browser:1.8.0")
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
   implementation("dev.chrisbanes.haze:haze:1.7.0") // frosted-glass blur behind the tab bar (Compose has no backdrop blur); 1.7.3 needs compileSdk 37
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

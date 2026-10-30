@@ -218,9 +218,10 @@ private fun Root() {
   var gateDismissed by remember { mutableStateOf(Terms.accepted() && isAuthenticated) }
 
   LaunchedEffect(isAuthenticated) {
-    if (isAuthenticated && Terms.accepted()) {
+    if (isAuthenticated) {
+      Terms.accept()
       gateDismissed = true
-    } else if (!isAuthenticated) {
+    } else {
       gateDismissed = false
     }
   }

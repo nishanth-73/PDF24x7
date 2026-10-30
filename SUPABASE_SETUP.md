@@ -31,15 +31,20 @@ All client-side screens, network engines, database migrations, Edge Functions, a
 
 ---
 
-### Step 2: Supabase URL Configuration (Deep Links)
+### Step 2: Supabase URL Configuration (Deep Links for Android APK)
 1. Go to **Authentication** $\rightarrow$ **URL Configuration**.
 2. Set **Site URL** to:
    ```
-   com.pandu78.pdf24x7://auth-callback
+   https://pdf24x7.vercel.app/
    ```
-3. Under **Redirect URLs**, add:
+   *(Important: Do NOT leave this as `http://localhost:3000`. Leaving `http://localhost:3000` causes the native mobile browser to redirect to localhost, throwing `ERR_CONNECTION_REFUSED` on Android.)*
+3. Under **Redirect URLs**, add each of the following URLs:
    ```
+   com.pandu78.pdf24x7://login-callback
    com.pandu78.pdf24x7://auth-callback
+   com.pandu78.pdf24x7://**
+   com.pdf24x7.app://login-callback
+   https://pdf24x7.vercel.app/**
    ```
 4. Click **Save**.
 

@@ -48,7 +48,8 @@ class MainActivity : ComponentActivity() {
 
   private fun handleAuthIntent(intent: Intent?) {
     val data = intent?.data ?: return
-    if (data.scheme == "com.pandu78.pdf24x7" && data.host == "auth-callback") {
+    val scheme = data.scheme?.lowercase()
+    if (scheme == "com.pandu78.pdf24x7" || scheme == "com.pdf24x7.app") {
       AuthManager.handleAuthDeepLink(data, lifecycleScope)
     }
   }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Patterns
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.activity.result.IntentSenderRequest
@@ -12,8 +13,10 @@ import com.google.android.gms.auth.api.identity.GetSignInIntentRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
 import kotlinx.coroutines.tasks.await
+import com.pandu78.PDF24x7.Terms
 import com.pandu78.PDF24x7.appContext
 import com.pandu78.PDF24x7.awaitResult
+import com.pandu78.PDF24x7.hostActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,12 +47,15 @@ object AuthManager {
   private const val KEY_USER_EMAIL = "user_email"
   private const val KEY_CONSENT_VERSION = "consent_version"
   private const val KEY_CONSENT_TIME = "consent_time"
+  private const val KEY_CODE_VERIFIER = "auth_code_verifier"
 
   private val _state = mutableStateOf<AuthState>(AuthState.Unauthenticated)
   val state: State<AuthState> get() = _state
 
   private val _recoveryToken = mutableStateOf<String?>(null)
   val recoveryToken: State<String?> get() = _recoveryToken
+
+  private var pendingOAuthCallback: ((AuthResult<AuthUser>) -> Unit)? = null
 
   private val prefs by lazy {
     appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -283,13 +289,32 @@ object AuthManager {
     }
   }
 
-  // ── 3. Google Sign-In via Supabase OAuth ──────────────────────────────────
+  // ── 3. Google Sign-In via Supabase OAuth (PKCE & Native ID Token) ──────────
+
+  private fun generateCodeVerifier(): String {
+    val bytes = ByteArray(64)
+    java.security.SecureRandom().nextBytes(bytes)
+    return android.util.Base64.encodeToString(
+      bytes,
+      android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+    )
+  }
+
+  private fun generateCodeChallenge(codeVerifier: String): String {
+    val bytes = codeVerifier.toByteArray(Charsets.US_ASCII)
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    val digest = md.digest(bytes)
+    return android.util.Base64.encodeToString(
+      digest,
+      android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+    )
+  }
 
   /**
    * Performs Google Sign-In using Supabase OAuth.
-   * If GOOGLE_CLIENT_ID is configured, initiates native Google Play Services sign-in
+   * If GOOGLE_CLIENT_ID is configured, attempts native Google Play Services sign-in
    * and exchanges the ID token with Supabase (grant_type=id_token).
-   * Otherwise opens the Supabase Google OAuth authorize URL in the browser / Custom Tab.
+   * Otherwise opens the Supabase Google OAuth authorize URL in Custom Tabs / browser with PKCE.
    */
   fun signInWithGoogle(
     activity: Activity? = null,
@@ -305,11 +330,13 @@ object AuthManager {
       return
     }
 
+    val targetActivity = activity ?: hostActivity
+
     // Path A: Native Google Identity Sign-In with ID Token exchange
-    if (SupabaseConfig.isGoogleConfigured && activity != null && scope != null) {
+    if (SupabaseConfig.isGoogleConfigured && targetActivity != null && scope != null) {
       scope.launch {
         try {
-          val signInClient = Identity.getSignInClient(activity)
+          val signInClient = Identity.getSignInClient(targetActivity)
           val request = GetSignInIntentRequest.builder()
             .setServerClientId(SupabaseConfig.googleClientId)
             .build()
@@ -326,36 +353,69 @@ object AuthManager {
               exchangeGoogleIdToken(idToken, email ?: "", scope, onResult)
               return@launch
             }
+          } else if (result.resultCode == Activity.RESULT_CANCELED) {
+            // User intentionally dismissed or cancelled Google prompt: do NOT launch browser
+            _state.value = AuthState.Unauthenticated
+            onResult(AuthResult.Error("Sign-in cancelled."))
+            return@launch
           }
-          launchBrowserOAuth(activity)
+          launchOAuthFlow(targetActivity, onResult)
         } catch (e: Exception) {
-          launchBrowserOAuth(activity)
-          onResult(AuthResult.Error("Redirecting to browser for Google Sign-In…"))
+          // If the user backed out or canceled the account chooser
+          val isCancelled = (e is ApiException && (e.statusCode == 16 || e.statusCode == 12501 || e.statusCode == 12502))
+          if (isCancelled) {
+            _state.value = AuthState.Unauthenticated
+            onResult(AuthResult.Error("Sign-in cancelled."))
+            return@launch
+          }
+          // On configuration issues (e.g. SHA-1 not linked in Google Cloud Console), fall back to browser OAuth
+          launchOAuthFlow(targetActivity, onResult)
         }
       }
       return
     }
 
-    // Path B: Supabase Browser OAuth flow with custom scheme callback
-    if (activity != null) {
-      launchBrowserOAuth(activity)
-      onResult(AuthResult.Error("Redirecting to browser for Google Sign-In…"))
+    // Path B: Supabase Browser OAuth flow with PKCE and custom scheme callback
+    if (targetActivity != null) {
+      launchOAuthFlow(targetActivity, onResult)
     } else {
       onResult(
         AuthResult.Error(
-          "Google Sign-In configuration required. Set GOOGLE_CLIENT_ID in your configuration and enable Google in the Supabase Dashboard."
+          "An active Activity is required to launch authentication."
         )
       )
     }
   }
 
-  private fun launchBrowserOAuth(activity: Activity) {
+  private fun launchOAuthFlow(
+    activity: Activity,
+    onResult: (AuthResult<AuthUser>) -> Unit,
+  ) {
     try {
-      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(SupabaseConfig.googleOAuthAuthorizeUrl)).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      val verifier = generateCodeVerifier()
+      val challenge = generateCodeChallenge(verifier)
+      prefs.edit().putString(KEY_CODE_VERIFIER, verifier).apply()
+      pendingOAuthCallback = onResult
+
+      _state.value = AuthState.Loading("Opening Google Sign-In…")
+      val authUrlString = SupabaseConfig.buildGoogleOAuthAuthorizeUrl(challenge)
+      val authUri = Uri.parse(authUrlString)
+
+      try {
+        val customTabsIntent = CustomTabsIntent.Builder()
+          .setShowTitle(true)
+          .build()
+        customTabsIntent.launchUrl(activity, authUri)
+      } catch (_: Exception) {
+        val browserIntent = Intent(Intent.ACTION_VIEW, authUri).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        activity.startActivity(browserIntent)
       }
-      activity.startActivity(intent)
-    } catch (_: Exception) {}
+    } catch (e: Exception) {
+      _state.value = AuthState.Error("Failed to launch Google Sign-In: ${e.localizedMessage}")
+      onResult(AuthResult.Error("Failed to launch Google Sign-In: ${e.localizedMessage}"))
+    }
   }
 
   /**
@@ -401,6 +461,7 @@ object AuthManager {
             val email = userObj?.optString("email") ?: fallbackEmail
 
             saveSession(accessToken, refreshToken, id, email, 2, System.currentTimeMillis())
+            Terms.accept()
             val user = AuthUser(id = id, email = email)
             AuthResult.Success(user)
           } else {
@@ -417,7 +478,10 @@ object AuthManager {
       }
 
       when (result) {
-        is AuthResult.Success -> _state.value = AuthState.Authenticated(result.data)
+        is AuthResult.Success -> {
+          Terms.accept()
+          _state.value = AuthState.Authenticated(result.data)
+        }
         is AuthResult.Error -> _state.value = AuthState.Error(result.message)
       }
       onResult(result)
@@ -624,41 +688,132 @@ object AuthManager {
     onResult?.invoke()
   }
 
-  // ── 8. Deep Link Handler (OAuth & Password Recovery) ──────────────────────
+  // ── 8. Deep Link Handler (OAuth PKCE & Password Recovery) ────────────────
 
   /**
-   * Processes incoming auth callback deep links (e.g., com.pandu78.pdf24x7://auth-callback#access_token=...&type=recovery).
+   * Processes incoming auth callback deep links:
+   * Supports both PKCE flow (?code=...) and implicit flow (#access_token=...).
+   * Supports schemes: com.pandu78.pdf24x7 and com.pdf24x7.app.
+   * Supports callbacks: login-callback and auth-callback.
    */
   fun handleAuthDeepLink(
     uri: Uri,
     scope: CoroutineScope,
     onResult: ((AuthResult<AuthUser>) -> Unit)? = null,
   ) {
-    if (uri.scheme != "com.pandu78.pdf24x7" || uri.host != "auth-callback") return
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "com.pandu78.pdf24x7" && scheme != "com.pdf24x7.app") return
 
     val params = mutableMapOf<String, String>()
 
-    // Parse URL fragment (Supabase OAuth & magic links use #access_token=...)
-    uri.fragment?.split("&")?.forEach { pair ->
-      val parts = pair.split("=", limit = 2)
-      if (parts.size == 2) {
-        params[parts[0]] = runCatching { URLDecoder.decode(parts[1], "UTF-8") }.getOrDefault(parts[1])
-      }
-    }
-
-    // Also check standard query parameters
+    // 1. Query parameters (e.g. ?code=... or ?error=...)
     uri.queryParameterNames?.forEach { key ->
       uri.getQueryParameter(key)?.let { params[key] = it }
     }
 
-    val errorDesc = params["error_description"] ?: params["error"]
-    if (!errorDesc.isNullOrBlank()) {
-      val err = AuthResult.Error(errorDesc)
-      _state.value = AuthState.Error(errorDesc)
-      onResult?.invoke(err)
+    // 2. URL fragment parameters (e.g. #access_token=...&refresh_token=... or #error=...)
+    uri.fragment?.split("&")?.forEach { pair ->
+      val parts = pair.split("=", limit = 2)
+      if (parts.size == 2) {
+        val key = parts[0]
+        val value = runCatching { URLDecoder.decode(parts[1], "UTF-8") }.getOrDefault(parts[1])
+        params[key] = value
+      }
+    }
+
+    val callback = onResult ?: pendingOAuthCallback
+    pendingOAuthCallback = null
+
+    val error = params["error"]
+    val errorDesc = params["error_description"] ?: params["error_msg"] ?: error
+    if (!error.isNullOrBlank() || !errorDesc.isNullOrBlank()) {
+      val isCancellation = error == "access_denied" ||
+        errorDesc?.contains("denied", ignoreCase = true) == true ||
+        errorDesc?.contains("cancel", ignoreCase = true) == true
+      val msg = if (isCancellation) "Sign-in was cancelled." else (errorDesc ?: "Authentication error.")
+      _state.value = if (isCancellation) AuthState.Unauthenticated else AuthState.Error(msg)
+      callback?.invoke(AuthResult.Error(msg))
       return
     }
 
+    // Path A: PKCE Authorization Code Exchange (?code=...)
+    val code = params["code"]
+    if (!code.isNullOrBlank()) {
+      val verifier = prefs.getString(KEY_CODE_VERIFIER, null)
+      if (verifier.isNullOrBlank()) {
+        val msg = "Missing PKCE code verifier. Please try signing in again."
+        _state.value = AuthState.Error(msg)
+        callback?.invoke(AuthResult.Error(msg))
+        return
+      }
+
+      _state.value = AuthState.Loading("Completing sign-in…")
+      scope.launch {
+        val result = withContext(Dispatchers.IO) {
+          try {
+            val url = URL(SupabaseConfig.tokenPkceEndpoint)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+              requestMethod = "POST"
+              setRequestProperty("Content-Type", "application/json")
+              setRequestProperty("apikey", SupabaseConfig.supabasePublishableKey)
+              setRequestProperty("Authorization", "Bearer ${SupabaseConfig.supabasePublishableKey}")
+              doOutput = true
+              connectTimeout = 12000
+              readTimeout = 12000
+            }
+
+            val payload = JSONObject().apply {
+              put("auth_code", code)
+              put("code_verifier", verifier)
+            }
+
+            OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
+            val httpCode = conn.responseCode
+            val text = (if (httpCode in 200..299) conn.inputStream else conn.errorStream)
+              ?.bufferedReader()?.use { it.readText() } ?: ""
+
+            if (httpCode in 200..299) {
+              val json = JSONObject(text)
+              val accessToken = json.optString("access_token")
+              val refreshToken = json.optString("refresh_token")
+              val userObj = json.optJSONObject("user")
+              val id = userObj?.optString("id") ?: ""
+              val email = userObj?.optString("email") ?: ""
+              val meta = userObj?.optJSONObject("user_metadata")
+              val name = meta?.optString("full_name") ?: meta?.optString("name") ?: ""
+
+              saveSession(accessToken, refreshToken, id, email, 2, System.currentTimeMillis())
+              prefs.edit().remove(KEY_CODE_VERIFIER).apply()
+              Terms.accept()
+              AuthResult.Success(AuthUser(id = id, email = email, displayName = name))
+            } else {
+              val errJson = runCatching { JSONObject(text) }.getOrNull()
+              val msg = errJson?.optString("error_description")
+                ?: errJson?.optString("msg")
+                ?: errJson?.optString("message")
+                ?: "Code exchange failed (HTTP $httpCode)."
+              AuthResult.Error(msg)
+            }
+          } catch (e: Exception) {
+            AuthResult.Error("Connection error during code exchange: ${e.localizedMessage ?: "Unknown error"}", e)
+          }
+        }
+
+        when (result) {
+          is AuthResult.Success -> {
+            Terms.accept()
+            _state.value = AuthState.Authenticated(result.data)
+          }
+          is AuthResult.Error -> {
+            _state.value = AuthState.Error(result.message)
+          }
+        }
+        callback?.invoke(result)
+      }
+      return
+    }
+
+    // Path B: Implicit Access Token Fragment (#access_token=...)
     val accessToken = params["access_token"]
     val refreshToken = params["refresh_token"]
     val type = params["type"]
@@ -666,11 +821,12 @@ object AuthManager {
     if (!accessToken.isNullOrBlank()) {
       if (type == "recovery") {
         _recoveryToken.value = accessToken
-        onResult?.invoke(AuthResult.Success(AuthUser(id = "recovery", email = "", displayName = "Recovery")))
+        callback?.invoke(AuthResult.Success(AuthUser(id = "recovery", email = "", displayName = "Recovery")))
         return
       }
 
       // Fetch user profile from Supabase with the token
+      _state.value = AuthState.Loading("Completing sign-in…")
       scope.launch {
         val result = withContext(Dispatchers.IO) {
           try {
@@ -690,8 +846,12 @@ object AuthManager {
               val json = JSONObject(text)
               val id = json.optString("id")
               val email = json.optString("email")
+              val meta = json.optJSONObject("user_metadata")
+              val name = meta?.optString("full_name") ?: meta?.optString("name") ?: ""
+
               saveSession(accessToken, refreshToken ?: "", id, email, 2, System.currentTimeMillis())
-              AuthResult.Success(AuthUser(id = id, email = email))
+              Terms.accept()
+              AuthResult.Success(AuthUser(id = id, email = email, displayName = name))
             } else {
               AuthResult.Error("Failed to retrieve user profile.")
             }
@@ -701,10 +861,13 @@ object AuthManager {
         }
 
         when (result) {
-          is AuthResult.Success -> _state.value = AuthState.Authenticated(result.data)
+          is AuthResult.Success -> {
+            Terms.accept()
+            _state.value = AuthState.Authenticated(result.data)
+          }
           is AuthResult.Error -> _state.value = AuthState.Error(result.message)
         }
-        onResult?.invoke(result)
+        callback?.invoke(result)
       }
     }
   }
