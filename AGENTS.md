@@ -1,4 +1,4 @@
-# PDF Tools: notes for coding agents
+# PDF24x7: notes for coding agents
 
 A native Android app in Kotlin and Jetpack Compose (the Gradle project is the repo root; the app module is `app/`).
 Package and application id: `com.pandu78.PDF24x7`.

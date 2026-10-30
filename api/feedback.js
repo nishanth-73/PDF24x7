@@ -59,7 +59,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const toEmail = process.env.FEEDBACK_TO_EMAIL || 'support@pdf24x7.com';
+    const toEmail = process.env.FEEDBACK_TO_EMAIL || process.env.APP_FEEDBACK_EMAIL || 'medurinishanth78@gmail.com';
     const fromEmail = process.env.FEEDBACK_FROM_EMAIL || 'PDF24x7 Feedback <onboarding@resend.dev>';
 
     // 3. Dispatch Email via Resend API

@@ -50,52 +50,100 @@ import com.pandu78.PDF24x7.auth.AuthManager
 import com.pandu78.PDF24x7.auth.AuthResult
 import com.pandu78.PDF24x7.auth.ForgotPasswordDialog
 
-private const val CONTACT = "bhingesamarth@gmail.com"
+private const val CONTACT = "medurinishanth78@gmail.com"
 
-val PRIVACY_TEXT = """1. What we collect
-PDF24x7 processes your PDF documents entirely on your device. We do not inspect, collect, or store your documents, photos, or scan contents on external servers. If you choose to create an account for cloud synchronization, your account email and authentication records are securely managed through our authentication provider. Advertising and third-party tracking remain disabled until an ad provider is explicitly configured.
+val PRIVACY_TEXT = """1. Information We Collect
+PDF24x7 is an offline-first application designed to process PDF documents directly on your device.
+We do not collect, inspect, or store your PDF documents, images, scanned pages, or document contents on our external servers.
+If you create an account, we collect and process the information required for authentication, such as your email address and authentication records. This information is securely managed through our authentication provider.
+Advertising and third-party tracking are currently disabled unless explicitly introduced and disclosed in a future update.
 
-2. Where your files live
-Every tool runs entirely on this device. Saved PDFs are kept in the app's own private storage, which other apps cannot read. They are never sent to external servers unless you explicitly configure cloud backup.
+2. How Your Files Are Stored
+PDF processing takes place locally on your device.
+Saved PDFs are stored in the app's private storage, which is not directly accessible to other apps. Your documents are not uploaded to our servers.
+Your files are transferred to an external service only when you explicitly choose to use an optional feature, such as Google Drive backup.
 
-3. Google Drive backup & cloud sync
-Off unless you turn it on. When enabled, the app copies your saved PDFs to your own Google Drive using the restricted drive.file scope. Those files travel from this phone to Google directly. You can disconnect at any time in Settings, which revokes the app's access to your account.
+3. Google Drive Backup
+Google Drive backup is optional and disabled by default.
+If you enable it, PDF24x7 will allow you to sign in to the Google account of your choice and back up your selected PDFs to your own Google Drive.
+Files are transferred from your device to Google Drive. We do not store copies of those files on our servers.
+You can disconnect Google Drive at any time through the app's Settings. Disconnecting revokes the app's access, subject to Google's authorization mechanisms.
+Your use of Google Drive is also governed by Google's Privacy Policy and applicable terms.
 
-4. Permissions
-Camera is used only while you are scanning a document. Photos and files access is used only when you pick an image to turn into a PDF or to place a signature. Neither is used in the background, and the app asks the first time it needs each one.
+4. App Permissions
+PDF24x7 requests permissions only when specific features require them.
+Camera: Used when you choose to scan a physical document.
+Photos and Files: Used when you select images or documents for PDF creation, editing, or signature placement.
+These permissions are not intended for background monitoring. The app requests access when the relevant feature is used.
 
-5. Reading text from scans
-Making a scanned PDF searchable uses a text recognition model built into the app. The page images and the text read from them never leave the device, and it needs no connection.
+5. Text Recognition (OCR)
+PDF24x7 uses an on-device text recognition model to make scanned PDFs searchable.
+The recognition process takes place locally. Page images and recognized text are not sent to our servers, and this feature does not require an internet connection.
 
-6. Children
-The app is not directed at children under 13, and collects no data from anyone of any age.
+6. Children's Privacy
+PDF24x7 is not specifically directed at children under the age of 13.
+We do not knowingly collect personal information from children through the app. If you believe personal information has been submitted improperly, please contact us through the app's Feedback feature.
 
-7. Changes
-If this policy changes in a way that matters, the app will show it to you again before you carry on.
+7. Changes to This Privacy Policy
+We may update this Privacy Policy when features, services, or legal requirements change.
+If a significant change is made, we will display the updated policy in the app and may request your acknowledgment before you continue using the affected features.
 
-8. Contact
-Questions about this policy: $CONTACT (Draft version — Pending final legal review)"""
+8. Feedback and Contact
+If you have questions, concerns, bug reports, or suggestions about PDF24x7 or this Privacy Policy, please use the Feedback feature available inside the app.
+You can also contact us at:
+Email: medurinishanth78@gmail.com"""
 
-val TERMS_TEXT = """1. The app
-PDF24x7 provides on-device PDF utilities and document scanning. Free on-device tools are provided as is. Optional account features, cloud synchronization, and advertising-supported services may be introduced in upcoming updates subject to these terms.
+val TERMS_TEXT = """1. About PDF24x7
+PDF24x7 provides PDF utilities and document-scanning features designed to help users create, convert, organize, and manage PDF documents.
+Most PDF processing features operate directly on your device.
+The app may also offer optional services such as account authentication, cloud synchronization, Google Drive backup, and other features in future updates.
 
-2. Your files are your responsibility
-The app changes documents you choose, and some changes cannot be undone: redaction removes content for good, a password locks a file, cropping discards part of a page. Keep your own copy of anything you cannot afford to lose. We have no copy and cannot recover one for you.
+2. Your Documents and Responsibility
+You are responsible for the documents you create, import, edit, process, and store using PDF24x7.
+Some operations may permanently change your documents or remove information. Examples include:
+Redaction, which permanently removes selected content.
+Cropping, which removes portions of a page.
+Password protection, which may restrict access to a document.
+Other editing operations that modify the original file.
+Always keep a backup of important documents before performing operations that may be irreversible.
+PDF24x7 does not maintain copies of your locally processed documents and may not be able to recover lost or damaged files.
 
-3. Acceptable use
-Do not use the app to alter documents in order to deceive anyone, to forge a signature, or for anything unlawful where you live. Placing a signature image on a document is not a statement about that document's legal standing — whether a signed PDF binds anyone depends on your local law and on the parties involved.
+3. Acceptable Use
+You agree not to use PDF24x7 to:
+Forge signatures or falsify documents.
+Alter documents with the intention of deceiving others.
+Violate applicable laws or regulations.
+Infringe the rights of other individuals or organizations.
+Engage in fraudulent or otherwise unlawful activities.
+Adding a signature image to a PDF does not automatically make the document legally valid or binding. Legal recognition depends on applicable laws and the circumstances of the agreement.
 
-4. No warranty
-The app comes with no warranty of any kind. Page detection, text recognition and compression are approximate by their nature, and any tool may contain errors. Check the result before you rely on it.
+4. No Warranty
+PDF24x7 is provided on an "as is" and "as available" basis, to the maximum extent permitted by applicable law.
+We do not guarantee that every feature will operate without errors or interruptions.
+Results from features such as text recognition, page detection, compression, and document conversion may vary. You are responsible for reviewing processed documents before relying on them.
 
-5. Limitation of liability
-So far as the law allows, we are not liable for lost data, lost profits, or any indirect or consequential loss arising from your use of the app.
+5. Limitation of Liability
+To the maximum extent permitted by applicable law, PDF24x7 and its developers shall not be liable for indirect, incidental, special, consequential, or punitive damages, including loss of data, loss of profits, or business interruption arising from the use of the application.
+Nothing in these Terms excludes liability that cannot legally be excluded under applicable law.
 
-6. Third-party services
-Google Drive backup and upcoming third-party integrations are governed by their respective terms of service.
+6. Third-Party Services
+PDF24x7 may integrate with third-party services, including Google Drive and authentication providers.
+Your use of these services is subject to their respective terms, privacy policies, and conditions.
+We are not responsible for the independent services, availability, policies, or practices of third-party providers.
 
-7. Changes
-If these terms change, the app will ask you to accept them again. Continuing to use it means you accept the version shown. (Draft version — Pending final legal review)"""
+7. Changes to the App and These Terms
+We may modify, add, or discontinue features as PDF24x7 develops.
+We may also update these Terms when necessary. Significant changes may be presented inside the app, and you may be asked to accept the updated Terms before continuing to use affected features.
+
+8. Feedback and Support
+For bug reports, suggestions, complaints, or questions regarding PDF24x7, please use the Feedback feature inside the application.
+You can also reach us at:
+Email: medurinishanth78@gmail.com
+
+PDF24x7
+Website: https://pdf24x7.vercel.app/
+GitHub: https://github.com/nishanth-73/PDF24x7
+Email: medurinishanth78@gmail.com"""
 
 val LEGAL_DOCS = mapOf(
   "privacy" to ("Privacy Policy" to PRIVACY_TEXT),

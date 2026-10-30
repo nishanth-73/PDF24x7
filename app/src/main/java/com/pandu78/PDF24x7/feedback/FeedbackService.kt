@@ -31,7 +31,7 @@ object FeedbackService {
   /**
    * Direct fallback support contact when the backend is offline or unconfigured.
    */
-  const val SUPPORT_EMAIL = "bhingesamarth@gmail.com"
+  const val SUPPORT_EMAIL = "medurinishanth78@gmail.com"
 
   val isConfigured: Boolean
     get() = SupabaseConfig.isConfigured

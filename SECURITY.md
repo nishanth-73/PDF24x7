@@ -25,7 +25,7 @@ PDF24x7 is designed as an offline-first, client-side utility:
 If you discover a security vulnerability or potential privacy concern:
 
 1. **Do not** disclose the vulnerability publicly in GitHub issues or public forums.
-2. Email the details to `bhingesamarth@gmail.com` with:
+2. Email the details to `medurinishanth78@gmail.com` with:
    - Description of the vulnerability.
    - Steps or proof of concept to reproduce.
    - Potential impact on document privacy or device integrity.
