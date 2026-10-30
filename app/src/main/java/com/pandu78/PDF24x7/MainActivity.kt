@@ -2,6 +2,9 @@ package com.pandu78.PDF24x7
 
 import android.content.Context
 import android.os.Build
+import android.content.Intent
+import androidx.lifecycle.lifecycleScope
+import com.pandu78.PDF24x7.auth.AuthManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,7 +35,22 @@ class MainActivity : ComponentActivity() {
     PDFBoxResourceLoader.init(applicationContext) // PdfBox's fonts and glyph lists
     preferFastestRefreshRate()
     enableEdgeToEdge()
+    handleAuthIntent(intent)
     setContent { App() }
+  }
+
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    handleAuthIntent(intent)
+  }
+
+  private fun handleAuthIntent(intent: Intent?) {
+    val data = intent?.data ?: return
+    if (data.scheme == "com.pandu78.pdf24x7" && data.host == "auth-callback") {
+      AuthManager.handleAuthDeepLink(data, lifecycleScope)
+    }
   }
 
   override fun onDestroy() {

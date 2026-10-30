@@ -1,5 +1,7 @@
 package com.pandu78.PDF24x7.feedback
 
+import com.pandu78.PDF24x7.auth.AuthManager
+import com.pandu78.PDF24x7.auth.AuthState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,7 +62,9 @@ fun FeedbackDialog(
   val scope = rememberCoroutineScope()
 
   var selectedCategory by remember { mutableStateOf(FEEDBACK_CATEGORIES[0]) }
-  var email by remember { mutableStateOf("") }
+  val authState by AuthManager.state
+  val defaultEmail = (authState as? AuthState.Authenticated)?.user?.email ?: ""
+  var email by remember { mutableStateOf(defaultEmail) }
   var message by remember { mutableStateOf("") }
   var busy by remember { mutableStateOf(false) }
 

@@ -99,6 +99,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import kotlinx.serialization.Serializable
 import java.io.File
+import com.pandu78.PDF24x7.auth.AuthManager
+import com.pandu78.PDF24x7.auth.AuthState
 
 // ── Navigation ──────────────────────────────────────────────────────────────
 
@@ -211,7 +213,17 @@ fun App() {
 private fun Root() {
   val controller = rememberNavController()
   val nav = remember { Nav(controller) }
-  var agreed by remember { mutableStateOf(Terms.accepted()) } // read before the first frame: no flash of the terms
+  val authState by AuthManager.state
+  val isAuthenticated = authState is AuthState.Authenticated
+  var gateDismissed by remember { mutableStateOf(Terms.accepted() && isAuthenticated) }
+
+  LaunchedEffect(isAuthenticated) {
+    if (isAuthenticated && Terms.accepted()) {
+      gateDismissed = true
+    } else if (!isAuthenticated) {
+      gateDismissed = false
+    }
+  }
   DisposableEffect(nav) {
     Viewer.open = { path, name -> nav.viewer(path, name) }
     onDispose { Viewer.open = null }
@@ -247,9 +259,12 @@ private fun Root() {
         }
       }
       // Over the navigator, never instead of it: the app is already up behind it, so accepting just lifts this away.
-      AnimatedVisibility(!agreed, enter = fadeIn(), exit = fadeOut(tween(260)) + slideOutVertically(tween(320)) { it / 6 }) {
+      AnimatedVisibility(!gateDismissed, enter = fadeIn(), exit = fadeOut(tween(260)) + slideOutVertically(tween(320)) { it / 6 }) {
         BackHandler { } // back must not skip the gate
-        Consent(onAccept = { Terms.accept(); agreed = true })
+        Consent(onAccept = {
+          Terms.accept()
+          gateDismissed = true
+        })
       }
     }
   }

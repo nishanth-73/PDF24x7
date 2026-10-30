@@ -3,7 +3,9 @@ package com.pandu78.PDF24x7.feedback
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import com.pandu78.PDF24x7.appContext
+import com.pandu78.PDF24x7.auth.AuthManager
+import com.pandu78.PDF24x7.auth.AuthState
+import com.pandu78.PDF24x7.auth.SupabaseConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -21,19 +23,18 @@ sealed class FeedbackResult {
 
 object FeedbackService {
   /**
-   * Set this to your deployed Vercel URL, e.g. "https://your-domain.vercel.app/api/feedback".
+   * Supabase Edge Function endpoint for receiving feedback and triggering Resend notifications.
    */
-  var endpointUrl: String = "https://pdf24x7.vercel.app/api/feedback"
+  val endpointUrl: String
+    get() = "${SupabaseConfig.supabaseUrl.trimEnd('/')}/functions/v1/submit-feedback"
 
   /**
-   * Direct support contact used for fallback when the API is unconfigured or offline.
+   * Direct fallback support contact when the backend is offline or unconfigured.
    */
   const val SUPPORT_EMAIL = "bhingesamarth@gmail.com"
 
   val isConfigured: Boolean
-    get() = endpointUrl.isNotBlank() &&
-      !endpointUrl.contains("your-domain") &&
-      endpointUrl.startsWith("http")
+    get() = SupabaseConfig.isConfigured
 
   fun sendFeedback(
     category: String,
@@ -52,7 +53,7 @@ object FeedbackService {
     if (!isConfigured) {
       onResult(
         FeedbackResult.Unconfigured(
-          "Online feedback service is not configured yet. You can send your feedback directly to support via email."
+          "Online feedback service is not configured yet. Set SUPABASE_URL in your configuration or email us directly."
         )
       )
       return
@@ -65,15 +66,21 @@ object FeedbackService {
           val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("apikey", SupabaseConfig.supabasePublishableKey)
+            val token = AuthManager.currentAccessToken ?: SupabaseConfig.supabasePublishableKey
+            setRequestProperty("Authorization", "Bearer $token")
             doOutput = true
-            connectTimeout = 8000
-            readTimeout = 8000
+            connectTimeout = 12000
+            readTimeout = 12000
           }
+
+          val userEmail = email?.trim().takeUnless { it.isNullOrBlank() }
+            ?: (AuthManager.state.value as? AuthState.Authenticated)?.user?.email
 
           val payload = JSONObject().apply {
             put("category", category)
             put("message", cleanMsg)
-            if (!email.isNullOrBlank()) put("email", email.trim())
+            if (!userEmail.isNullOrBlank()) put("email", userEmail)
             put("appVersion", appVersion)
           }
 
@@ -85,10 +92,6 @@ object FeedbackService {
           if (code in 200..299) {
             val json = JSONObject(response)
             FeedbackResult.Success(json.optString("message", "Feedback received successfully. Thank you!"))
-          } else if (code == 503) {
-            FeedbackResult.Unconfigured(
-              "Resend email API is not configured on the server yet. You can send feedback directly via email."
-            )
           } else {
             val json = runCatching { JSONObject(response) }.getOrNull()
             val err = json?.optString("error") ?: "Submission failed (HTTP $code)."
@@ -123,9 +126,6 @@ object FeedbackService {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
       context.startActivity(intent)
-    } catch (_: Exception) {
-      // Fallback if no email client installed
-    }
+    } catch (_: Exception) {}
   }
 }
-

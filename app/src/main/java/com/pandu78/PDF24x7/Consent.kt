@@ -1,14 +1,17 @@
 package com.pandu78.PDF24x7
 
+import android.app.Activity
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.BackHandler
-import androidx.compose.ui.draw.clip
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.delay
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -24,32 +27,30 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import com.pandu78.PDF24x7.auth.AuthManager
+import com.pandu78.PDF24x7.auth.AuthResult
+import com.pandu78.PDF24x7.auth.ForgotPasswordDialog
 
-// Shown once, before anything else, on a fresh install, and again from Settings/Profile to read back.
 private const val CONTACT = "bhingesamarth@gmail.com"
-
-private val POINTS = listOf(
-  I.cellphoneLock to "Every tool runs on this phone",
-  I.shieldCheckOutline to "Privacy-focused & local by default",
-  I.googleDrive to "Google Drive backup is optional",
-  I.wifiOff to "Works with no connection",
-)
 
 val PRIVACY_TEXT = """1. What we collect
 PDF24x7 processes your PDF documents entirely on your device. We do not inspect, collect, or store your documents, photos, or scan contents on external servers. If you choose to create an account for cloud synchronization, your account email and authentication records are securely managed through our authentication provider. Advertising and third-party tracking remain disabled until an ad provider is explicitly configured.
@@ -101,11 +102,17 @@ val LEGAL_DOCS = mapOf(
   "terms" to ("Terms & Conditions" to TERMS_TEXT),
 )
 
-/** First launch: a short tour, then the terms. Reading the terms again from Settings goes straight to them. */
+/**
+ * Gate screen: displays the Welcome/Authentication flow on initial launch,
+ * or opens the terms/privacy reader modal when viewed from Settings (onClose != null).
+ */
 @Composable
 fun Consent(onAccept: (() -> Unit)? = null, onClose: (() -> Unit)? = null) {
-  var intro by rememberSaveable { mutableStateOf(onAccept != null) }
-  if (intro) Onboarding { intro = false } else ConsentBody(onAccept, onClose)
+  if (onClose != null) {
+    LegalDocViewerModal(onClose = onClose)
+  } else {
+    WelcomeAuthScreen(onAccept = onAccept)
+  }
 }
 
 @Composable
@@ -142,54 +149,385 @@ fun DocViewerSheet(docKey: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ConsentBody(onAccept: (() -> Unit)?, onClose: (() -> Unit)?) {
+fun LegalDocViewerModal(onClose: () -> Unit) {
+  var selectedDoc by remember { mutableStateOf("privacy") }
+  BackHandler(onBack = onClose)
+  Column(
+    Modifier
+      .fillMaxSize()
+      .background(c.bg)
+      .statusBarsPadding()
+      .navigationBarsPadding(),
+  ) {
+    Row(
+      Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+      Row(
+        Modifier
+          .background(c.sunken, RoundedCornerShape(10.dp))
+          .padding(3.dp),
+      ) {
+        Box(
+          Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selectedDoc == "privacy") c.surface else Color.Transparent)
+            .tap { selectedDoc = "privacy" }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+          T("Privacy Policy", Type.med.copy(fontSize = Type.small.fontSize), if (selectedDoc == "privacy") c.ink else c.sub)
+        }
+        Box(
+          Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selectedDoc == "terms") c.surface else Color.Transparent)
+            .tap { selectedDoc = "terms" }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+          T("Terms & Conditions", Type.med.copy(fontSize = Type.small.fontSize), if (selectedDoc == "terms") c.ink else c.sub)
+        }
+      }
+      IconBtn(I.close, 24.dp, label = "Close", onClick = onClose)
+    }
+    val (_, body) = LEGAL_DOCS.getValue(selectedDoc)
+    T(
+      body,
+      Type.small.copy(fontSize = Type.small.fontSize * 1.05f, lineHeight = Type.small.lineHeight * 1.15f),
+      c.sub,
+      Modifier
+        .verticalScroll(rememberScrollState())
+        .padding(horizontal = 20.dp)
+        .padding(bottom = 32.dp),
+    )
+  }
+}
+
+@Composable
+fun WelcomeAuthScreen(onAccept: (() -> Unit)?) {
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
+  val activity = context as? Activity
+
+  var isSignUp by rememberSaveable { mutableStateOf(false) }
+  var email by rememberSaveable { mutableStateOf("") }
+  var password by rememberSaveable { mutableStateOf("") }
+  var confirmPassword by rememberSaveable { mutableStateOf("") }
+  var passwordVisible by rememberSaveable { mutableStateOf(false) }
+  var privacyAccepted by rememberSaveable { mutableStateOf(false) }
+  var termsAccepted by rememberSaveable { mutableStateOf(false) }
+
+  var busy by remember { mutableStateOf(false) }
+  var googleBusy by remember { mutableStateOf(false) }
+  var errorMessage by remember { mutableStateOf<String?>(null) }
+  var successMessage by remember { mutableStateOf<String?>(null) }
+  var showForgotPassword by remember { mutableStateOf(false) }
   var doc by remember { mutableStateOf<String?>(null) }
-  var privacy by remember { mutableStateOf(false) }
-  var terms by remember { mutableStateOf(false) }
-  if (onClose != null) BackHandler(doc == null, onClose)
+
+  val scrollState = rememberScrollState()
 
   Box(Modifier.fillMaxSize().background(c.bg)) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-      if (onClose != null) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
-          IconBtn(I.close, 24.dp, label = "Close", onClick = onClose)
-        }
-      }
-      Column(
-        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 30.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    Column(
+      Modifier
+        .fillMaxSize()
+        .statusBarsPadding()
+        .navigationBarsPadding()
+        .verticalScroll(scrollState)
+        .padding(horizontal = 24.dp, vertical = 20.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center,
+    ) {
+      Spacer(Modifier.height(8.dp))
+
+      // 1. Official PDF24x7 App Logo (Properly Centered, Sized, and Spaced)
+      Box(
+        Modifier
+          .size(76.dp)
+          .shadow(6.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.12f), spotColor = Color.Black.copy(alpha = 0.18f))
+          .clip(CircleShape)
+          .background(Color.White),
+        contentAlignment = Alignment.Center,
       ) {
-        val pop = remember { Animatable(0.6f) }
-        LaunchedEffect(Unit) { pop.animateTo(1f, spring(0.5f, Spring.StiffnessLow)) }
-        Box(
-          Modifier.size(84.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
-            .clip(RoundedCornerShape(26.dp)).background(c.primary),
-          contentAlignment = Alignment.Center,
-        ) { Icon(I.filePdfBox, 46.dp, c.onPrimary) }
-        T("PDF24x7", Type.largeTitle, modifier = Modifier.padding(top = 18.dp))
-        T("Your documents never leave this phone.", Type.body, c.sub, Modifier.padding(top = 4.dp), align = TextAlign.Center)
-        Column(Modifier.fillMaxWidth().padding(top = 30.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-          POINTS.forEachIndexed { i, (glyph, label) -> Stagger(i) { Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).background(c.sunken, RoundedCornerShape(Radius.tile)), contentAlignment = Alignment.Center) { Icon(glyph, 18.dp, c.sub) }
-            Spacer(Modifier.size(12.dp))
-            T(label, Type.body.copy(fontSize = Type.body.fontSize * 0.97f))
-          } } }
+        Image(
+          painter = painterResource(R.drawable.app_logo),
+          contentDescription = "PDF24x7 Logo",
+          modifier = Modifier.size(76.dp),
+        )
+      }
+
+      Spacer(Modifier.height(16.dp))
+
+      // 2. Welcoming Heading and Subtitle
+      T(
+        text = if (isSignUp) "Create Account" else "Welcome to PDF24x7",
+        style = Type.largeTitle,
+        align = TextAlign.Center,
+      )
+      Spacer(Modifier.height(4.dp))
+      T(
+        text = if (isSignUp) "Sign up to get started with PDF24x7" else "Sign in to continue",
+        style = Type.body,
+        color = c.sub,
+        align = TextAlign.Center,
+      )
+
+      Spacer(Modifier.height(20.dp))
+
+      // 3. Google Sign-In Button
+      Btn(
+        label = "Continue with Google",
+        modifier = Modifier.fillMaxWidth(),
+        icon = I.google,
+        kind = BtnKind.Secondary,
+        busy = googleBusy,
+        enabled = !busy && !googleBusy,
+        onClick = {
+          if (!privacyAccepted || !termsAccepted) {
+            errorMessage = "Please accept the Privacy Policy and Terms & Conditions to continue."
+            return@Btn
+          }
+          googleBusy = true
+          errorMessage = null
+          successMessage = null
+          AuthManager.signInWithGoogle(activity, scope) { result ->
+            googleBusy = false
+            when (result) {
+              is AuthResult.Success -> {
+                Terms.accept()
+                onAccept?.invoke()
+              }
+              is AuthResult.Error -> {
+                errorMessage = result.message
+              }
+            }
+          }
+        },
+      )
+
+      // 4. Clean Divider
+      Spacer(Modifier.height(16.dp))
+      Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Box(Modifier.weight(1f).height(0.6.dp).background(c.line))
+        T("or", Type.small, c.faint, Modifier.padding(horizontal = 10.dp))
+        Box(Modifier.weight(1f).height(0.6.dp).background(c.line))
+      }
+      Spacer(Modifier.height(16.dp))
+
+      // 5. Email Field
+      Field(
+        value = email,
+        onChange = { email = it; errorMessage = null },
+        placeholder = "Email address",
+        keyboard = KeyboardType.Email,
+      )
+
+      Spacer(Modifier.height(10.dp))
+
+      // 6. Password Field
+      Field(
+        value = password,
+        onChange = { password = it; errorMessage = null },
+        placeholder = if (isSignUp) "Password (min 6 characters)" else "Password",
+        keyboard = KeyboardType.Password,
+        secret = !passwordVisible,
+        trailing = {
+          IconBtn(
+            glyph = if (passwordVisible) I.eyeOffOutline else I.eyeOutline,
+            color = c.sub,
+            label = if (passwordVisible) "Hide password" else "Show password",
+          ) {
+            passwordVisible = !passwordVisible
+          }
+        },
+      )
+
+      // 7. Confirm Password Field (Sign Up mode only)
+      if (isSignUp) {
+        Spacer(Modifier.height(10.dp))
+        Field(
+          value = confirmPassword,
+          onChange = { confirmPassword = it; errorMessage = null },
+          placeholder = "Confirm password",
+          keyboard = KeyboardType.Password,
+          secret = !passwordVisible,
+          )
+      }
+
+      // 8. Forgot Password Link (Sign In mode only)
+      if (!isSignUp) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+          Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.End,
+        ) {
+          T(
+            "Forgot password?",
+            Type.small,
+            c.primary,
+            Modifier.tap { showForgotPassword = true },
+          )
         }
       }
-      Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 8.dp)) {
-        if (onAccept != null) {
-          Tick(privacy, "I have read the", "Privacy Policy", { privacy = !privacy }) { doc = "privacy" }
-          Tick(terms, "I agree to the", "Terms & Conditions", { terms = !terms }) { doc = "terms" }
-          Btn("Continue", Modifier.fillMaxWidth().padding(top = 14.dp), enabled = privacy && terms, onClick = onAccept)
+
+      // Status / Error Messages
+      if (errorMessage != null) {
+        Spacer(Modifier.height(10.dp))
+        T(
+          text = errorMessage!!,
+          style = Type.small,
+          color = c.error,
+          align = TextAlign.Center,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+      if (successMessage != null) {
+        Spacer(Modifier.height(10.dp))
+        T(
+          text = successMessage!!,
+          style = Type.small,
+          color = c.primary,
+          align = TextAlign.Center,
+          modifier = Modifier.fillMaxWidth(),
+        )
+      }
+
+      Spacer(Modifier.height(14.dp))
+
+      // 9. Preserved Checkboxes: Required for Authentication
+      Tick(
+        on = privacyAccepted,
+        before = "I have read the",
+        link = "Privacy Policy",
+        toggle = { privacyAccepted = !privacyAccepted; errorMessage = null },
+        open = { doc = "privacy" },
+      )
+      Tick(
+        on = termsAccepted,
+        before = "I agree to the",
+        link = "Terms & Conditions",
+        toggle = { termsAccepted = !termsAccepted; errorMessage = null },
+        open = { doc = "terms" },
+      )
+
+      Spacer(Modifier.height(16.dp))
+
+      // 10. Authentication Action Button (Sign In or Sign Up)
+      val canSubmit = if (isSignUp) {
+        email.isNotBlank() && password.length >= 6 && password == confirmPassword && privacyAccepted && termsAccepted && !busy
+      } else {
+        email.isNotBlank() && password.isNotBlank() && privacyAccepted && termsAccepted && !busy
+      }
+
+      Btn(
+        label = if (isSignUp) "Sign Up" else "Sign In",
+        modifier = Modifier.fillMaxWidth(),
+        busy = busy,
+        enabled = canSubmit,
+        onClick = {
+          if (!privacyAccepted || !termsAccepted) {
+            errorMessage = "Please accept the Privacy Policy and Terms & Conditions to continue."
+            return@Btn
+          }
+          if (!AuthManager.isValidEmail(email)) {
+            errorMessage = "Please enter a valid email address."
+            return@Btn
+          }
+          if (password.length < 6) {
+            errorMessage = "Password must be at least 6 characters."
+            return@Btn
+          }
+          if (isSignUp && password != confirmPassword) {
+            errorMessage = "Passwords do not match."
+            return@Btn
+          }
+
+          busy = true
+          errorMessage = null
+          successMessage = null
+
+          if (isSignUp) {
+            AuthManager.signUp(email, password, 2, scope) { result ->
+              busy = false
+              when (result) {
+                is AuthResult.Success -> {
+                  Terms.accept()
+                  if (result.data.displayName == "Pending Email Confirmation") {
+                    successMessage = "Confirmation email sent! Please check your inbox."
+                  } else {
+                    onAccept?.invoke()
+                  }
+                }
+                is AuthResult.Error -> {
+                  errorMessage = result.message
+                }
+              }
+            }
+          } else {
+            AuthManager.signIn(email, password, scope) { result ->
+              busy = false
+              when (result) {
+                is AuthResult.Success -> {
+                  Terms.accept()
+                  onAccept?.invoke()
+                }
+                is AuthResult.Error -> {
+                  errorMessage = result.message
+                }
+              }
+            }
+          }
+        },
+      )
+
+      // 11. Toggle between Sign In and Sign Up
+      Spacer(Modifier.height(14.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (isSignUp) {
+          T("Already have an account? ", Type.small, c.sub)
+          T(
+            "Sign In",
+            Type.small.copy(fontWeight = Type.bold.fontWeight),
+            c.primary,
+            Modifier.tap { isSignUp = false; errorMessage = null },
+          )
         } else {
-          T("Privacy Policy", Type.item, c.primary, Modifier.tap { doc = "privacy" }.padding(vertical = 11.dp))
-          T("Terms & Conditions", Type.item, c.primary, Modifier.tap { doc = "terms" }.padding(vertical = 11.dp))
+          T("Don't have an account? ", Type.small, c.sub)
+          T(
+            "Sign Up",
+            Type.small.copy(fontWeight = Type.bold.fontWeight),
+            c.primary,
+            Modifier.tap { isSignUp = true; errorMessage = null },
+          )
         }
-        T("Last updated ${Terms.UPDATED}", Type.small, c.faint, Modifier.fillMaxWidth().padding(top = 14.dp), align = TextAlign.Center)
       }
+
+      Spacer(Modifier.height(14.dp))
+      T("Last updated ${Terms.UPDATED}", Type.small, c.faint, align = TextAlign.Center)
+      Spacer(Modifier.height(10.dp))
     }
 
-    AnimatedVisibility(doc != null, enter = slideInVertically(tween(380)) { it }, exit = slideOutVertically(tween(300)) { it }) {
+    // Modal dialogs: Forgot Password and Terms/Privacy full sheet
+    if (showForgotPassword) {
+      ForgotPasswordDialog(
+        initialEmail = email,
+        onDismiss = { showForgotPassword = false },
+      )
+    }
+
+    AnimatedVisibility(
+      doc != null,
+      enter = slideInVertically(tween(380)) { it },
+      exit = slideOutVertically(tween(300)) { it },
+    ) {
       DocViewerSheet(doc ?: "privacy") { doc = null }
     }
   }
@@ -231,17 +569,34 @@ fun LegalConsentCheckbox(
 
 @Composable
 private fun Tick(on: Boolean, before: String, link: String, toggle: () -> Unit, open: () -> Unit) {
-  Row(Modifier.fillMaxWidth().tap(scaleTo = 0.98f, onClick = toggle).padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+  Row(
+    Modifier
+      .fillMaxWidth()
+      .tap(scaleTo = 0.98f, onClick = toggle)
+      .padding(vertical = 6.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
     val box = RoundedCornerShape(7.dp)
     Box(
-      Modifier.size(22.dp).background(if (on) c.primary else Color.Transparent, box).border(2.dp, if (on) c.primary else c.lineStrong, box),
+      Modifier
+        .size(22.dp)
+        .background(if (on) c.primary else Color.Transparent, box)
+        .border(2.dp, if (on) c.primary else c.lineStrong, box),
       contentAlignment = Alignment.Center,
-    ) { if (on) Icon(I.check, 15.dp, Color.White) }
+    ) {
+      if (on) Icon(I.check, 15.dp, Color.White)
+    }
     Spacer(Modifier.size(12.dp))
     T("$before ", Type.small.copy(fontSize = Type.small.fontSize * 1.07f), c.sub)
-    T(link, Type.small.copy(fontSize = Type.small.fontSize * 1.07f, fontWeight = Type.item.fontWeight), c.primary, Modifier.tap(scaleTo = 0.94f, onClick = open))
+    T(
+      link,
+      Type.small.copy(fontSize = Type.small.fontSize * 1.07f, fontWeight = Type.item.fontWeight),
+      c.primary,
+      Modifier.tap(scaleTo = 0.94f, onClick = open),
+    )
   }
 }
+
 
 /**
  * Fades and lifts its content in, a beat after the one before it. Plays once per screen: coming back to a screen (from a

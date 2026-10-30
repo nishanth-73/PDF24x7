@@ -9,6 +9,10 @@ app/build/
 
 # Local machine settings (SDK path) and IDE files
 local.properties
+.env
+.env.*
+!.env.example
+supabase.properties
 *.iml
 .idea/
 .vscode/

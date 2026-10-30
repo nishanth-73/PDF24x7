@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
   id("org.jetbrains.kotlin.plugin.compose")
   id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+val configProps = Properties().apply {
+  val localProps = rootProject.file("local.properties")
+  if (localProps.exists()) localProps.inputStream().use { load(it) }
+  val envFile = rootProject.file(".env")
+  if (envFile.exists()) envFile.inputStream().use { load(it) }
+}
+
+fun resolveConfig(key: String, fallback: String): String {
+  val v = System.getenv(key) ?: configProps.getProperty(key) ?: (findProperty(key) as? String)
+  return if (!v.isNullOrBlank()) v.trim() else fallback
 }
 
 android {
@@ -17,6 +31,14 @@ android {
     targetSdk = 36
     versionCode = 3
     versionName = "2.1.0"
+
+    val supabaseUrl = resolveConfig("SUPABASE_URL", "https://YOUR_PROJECT_ID.supabase.co")
+    val supabasePublishableKey = resolveConfig("SUPABASE_PUBLISHABLE_KEY", "YOUR_SUPABASE_ANON_PUBLIC_KEY")
+    val googleClientId = resolveConfig("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com")
+
+    buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+    buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
+    buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
     // OpenCV ships a native lib per ABI; one keeps the APK small. `-PallAbis` (the release workflow) builds an APK per
     // ABI plus a universal one instead.
     if (!project.hasProperty("allAbis")) ndk { abiFilters += "arm64-v8a" }
@@ -65,7 +87,10 @@ android {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
   }
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
   packaging { jniLibs { useLegacyPackaging = true } }
 }
 

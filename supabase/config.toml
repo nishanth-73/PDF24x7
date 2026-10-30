@@ -1,0 +1,32 @@
+# ==============================================================================
+# Supabase Local & Production Project Configuration for PDF24x7
+# ==============================================================================
+
+project_id = "pdf24x7"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+
+[auth]
+enabled = true
+site_url = "com.pandu78.pdf24x7://auth-callback"
+additional_redirect_urls = ["com.pandu78.pdf24x7://auth-callback"]
+jwt_expiry = 3600
+enable_signup = true
+
+[functions.send-welcome-email]
+verify_jwt = false
+
+[functions.submit-feedback]
+verify_jwt = false
+
+[functions.notify-admin-feedback]
+verify_jwt = false
+
