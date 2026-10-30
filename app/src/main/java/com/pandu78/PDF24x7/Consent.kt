@@ -143,7 +143,6 @@ Email: medurinishanth78@gmail.com
 
 PDF24x7
 Website: https://pdf24x7.vercel.app/
-GitHub: https://github.com/nishanth-73/PDF24x7
 Email: medurinishanth78@gmail.com"""
 
 val LEGAL_DOCS = mapOf(
